@@ -14,7 +14,7 @@ func TestGetDbTables(t *testing.T) {
 	}
 }
 
-func TestNormalizeTableName(t *testing.T) {
+func TestNormalizeString(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -64,9 +64,9 @@ func TestNormalizeTableName(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := NormalizeTableName(tt.input)
+		result := NormalizeString(tt.input)
 		if result != tt.expected {
-			t.Errorf("NormalizeTableName(%q) = %q; want %q", tt.input, result, tt.expected)
+			t.Errorf("NormalizeString(%q) = %q; want %q", tt.input, result, tt.expected)
 		}
 	}
 }

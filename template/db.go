@@ -9,5 +9,5 @@ import (
 )
 
 func PathCreateDBDir() error {
-	return util.EnsureDir(filepath.Join(conf.Args.OutputPath, db.NormalizeTableName(conf.Args.DBName)))
+	return util.EnsureDir(filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName)))
 }

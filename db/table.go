@@ -40,7 +40,7 @@ func GetDbTables(c *sql.DB) ([]string, error) {
 
 var separators = []rune{'_', '-', '.'}
 
-func NormalizeTableName(input string) string {
+func NormalizeString(input string) string {
 	// Replace all separators with " "
 	for _, sep := range separators {
 		input = strings.ReplaceAll(input, string(sep), " ")
@@ -98,7 +98,7 @@ func GetDbTableFields(c *sql.DB, tableName string) ([]conf.TableField, error) {
 			Name:       columnName,
 			DataType:   dataType,
 			ColumnType: columnType,
-			GOType:     IdentifyGOType(dataType, columnName),
+			GOType:     IdentifyGOType(dataType, columnType),
 		})
 	}
 
@@ -138,12 +138,19 @@ func IdentifyGOType(dataType, columnType string) string {
 				return "[]byte"
 			}
 		}
-		return "uint64" // fallback if unknown size
+		return "uint64"
 	case "bool", "boolean":
 		return "bool"
-	case "char", "varchar", "text", "tinytext", "mediumtext", "longtext", "enum", "set":
+	case "char":
+		if ct == "char(36)" {
+			return "uuid.UUID"
+		}
 		return "string"
-	case "binary", "varbinary", "blob", "tinyblob", "mediumblob", "longblob":
+	case "binary":
+		return "[]byte"
+	case "varchar", "text", "tinytext", "mediumtext", "longtext", "enum", "set":
+		return "string"
+	case "varbinary", "blob", "tinyblob", "mediumblob", "longblob":
 		return "[]byte"
 	case "date", "time", "year", "datetime", "timestamp":
 		return "time.Time"

@@ -12,7 +12,7 @@ import (
 
 func PathCreateTableDirs(tableNames []string) error {
 	for _, tableName := range tableNames {
-		p := filepath.Join(conf.Args.OutputPath, db.NormalizeTableName(conf.Args.DBName), db.NormalizeTableName(tableName))
+		p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), db.NormalizeString(tableName))
 		if err := util.EnsureDir(p); err != nil {
 			return nabu.FromError(err).WithArgs(p).Log()
 		}

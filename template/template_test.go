@@ -1,17 +1,20 @@
 package template
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/rah-0/margo/db"
 )
 
-func TestTemplateStruct(t *testing.T) {
+func TestGetStruct(t *testing.T) {
 	tfs, err := db.GetDbTableFields(conn, tableNames[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := TemplateStruct(tableNames[0], tfs)
+
+	template := GetStruct(tableNames[0], tfs)
+
 	if template != `type AllTypes struct {
 Id int
 TinySigned int
@@ -31,7 +34,7 @@ DecimalField decimal.Decimal
 DecField decimal.Decimal
 NumericField decimal.Decimal
 FixedField decimal.Decimal
-Bit1 uint64
+Bit1 bool
 Bit8 uint64
 Bit64 uint64
 BoolField int
@@ -55,8 +58,26 @@ TimeField time.Time
 YearField time.Time
 DatetimeField time.Time
 TimestampField time.Time
-UuidField string
+UuidField uuid.UUID
 }` {
+		t.Fatal("unexpected result:", template)
+	}
+}
+
+func TestGetImports(t *testing.T) {
+	tfs, err := db.GetDbTableFields(conn, tableNames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	template := GetImports(tfs)
+	fmt.Println(template)
+
+	if template != `import (
+"github.com/google/uuid"
+"github.com/shopspring/decimal"
+"time"
+)` {
 		t.Fatal("unexpected result:", template)
 	}
 }
