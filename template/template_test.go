@@ -1,7 +1,6 @@
 package template
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/rah-0/margo/db"
@@ -59,7 +58,9 @@ YearField time.Time
 DatetimeField time.Time
 TimestampField time.Time
 UuidField uuid.UUID
-}` {
+}
+
+` {
 		t.Fatal("unexpected result:", template)
 	}
 }
@@ -71,13 +72,95 @@ func TestGetImports(t *testing.T) {
 	}
 
 	template := GetImports(tfs)
-	fmt.Println(template)
 
-	if template != `import (
+	expected := `import (
 "github.com/google/uuid"
 "github.com/shopspring/decimal"
 "time"
-)` {
+)
+
+`
+	if template != expected {
 		t.Fatal("unexpected result:", template)
+	}
+}
+
+func TestGetFileContent(t *testing.T) {
+	tfs, err := db.GetDbTableFields(conn, tableNames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	template := GetFileContent(tableNames[0], tfs)
+
+	expected := `package AllTypes
+
+import (
+"github.com/google/uuid"
+"github.com/shopspring/decimal"
+"time"
+)
+
+type AllTypes struct {
+Id int
+TinySigned int
+TinyUnsigned uint
+SmallSigned int
+SmallUnsigned uint
+MediumSigned int
+MediumUnsigned uint
+IntSigned int
+IntUnsigned uint
+BigSigned int64
+BigUnsigned uint64
+FloatField float64
+DoubleField float64
+RealField float64
+DecimalField decimal.Decimal
+DecField decimal.Decimal
+NumericField decimal.Decimal
+FixedField decimal.Decimal
+Bit1 bool
+Bit8 uint64
+Bit64 uint64
+BoolField int
+BooleanField int
+CharField string
+VarcharField string
+TextField string
+TinytextField string
+MediumtextField string
+LongtextField string
+EnumField string
+SetField string
+BinaryField []byte
+VarbinaryField []byte
+BlobField []byte
+TinyblobField []byte
+MediumblobField []byte
+LongblobField []byte
+DateField time.Time
+TimeField time.Time
+YearField time.Time
+DatetimeField time.Time
+TimestampField time.Time
+UuidField uuid.UUID
+}
+
+`
+	if template != expected {
+		t.Fatal("unexpected result:", template)
+	}
+}
+
+func TestCreateGoFile(t *testing.T) {
+	for _, tn := range tableNames {
+		tfs, err := db.GetDbTableFields(conn, tn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := CreateGoFile(tn, tfs); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

@@ -1,9 +1,27 @@
 package template
 
 import (
+	"path/filepath"
+	"sort"
+
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
+	"github.com/rah-0/margo/util"
 )
+
+func CreateGoFile(rawTableName string, tfs []conf.TableField) error {
+	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), db.NormalizeString(rawTableName), "entity.go")
+	c := GetFileContent(rawTableName, tfs)
+	return util.WriteGoFile(p, c)
+}
+
+func GetFileContent(rawTableName string, tfs []conf.TableField) string {
+	t := "package " + db.NormalizeString(rawTableName) + "\n\n"
+	t += GetImports(tfs)
+	t += GetStruct(rawTableName, tfs)
+
+	return t
+}
 
 func GetImports(tfs []conf.TableField) string {
 	importSet := map[string]struct{}{}
@@ -24,10 +42,15 @@ func GetImports(tfs []conf.TableField) string {
 	}
 
 	imports := "import (\n"
+	var keys []string
 	for imp := range importSet {
+		keys = append(keys, imp)
+	}
+	sort.Strings(keys)
+	for _, imp := range keys {
 		imports += imp + "\n"
 	}
-	imports += ")"
+	imports += ")\n\n"
 	return imports
 }
 
@@ -36,6 +59,6 @@ func GetStruct(rawTableName string, tfs []conf.TableField) string {
 	for _, tf := range tfs {
 		t += db.NormalizeString(tf.Name) + " " + tf.GOType + "\n"
 	}
-	t += "}"
+	t += "}\n\n"
 	return t
 }
