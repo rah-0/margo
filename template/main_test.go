@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	conn *sql.DB
-	err  error
+	tableNames []string
+	conn       *sql.DB
+	err        error
 )
 
 func TestMain(m *testing.M) {
@@ -20,8 +21,18 @@ func TestMain(m *testing.M) {
 		M: m,
 		LoadResources: func() error {
 			conf.CheckFlags()
+
 			conn, err = db.Connect()
-			return err
+			if err != nil {
+				return err
+			}
+
+			tableNames, err = db.GetDbTables(conn)
+			if err != nil {
+				return err
+			}
+
+			return nil
 		},
 		UnloadResources: func() error {
 			return conn.Close()

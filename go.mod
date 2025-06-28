@@ -11,4 +11,5 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/rah-0/nabu v0.0.5 // indirect
 	github.com/rah-0/testmark v1.0.3 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 )

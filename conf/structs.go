@@ -10,6 +10,8 @@ type Arguments struct {
 }
 
 type TableField struct {
-	Name string
-	Type string
+	Name       string
+	DataType   string
+	ColumnType string
+	GOType     string
 }

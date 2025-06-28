@@ -1,5 +1,10 @@
 package conf
 
+import (
+	"regexp"
+)
+
 var (
-	Args = Arguments{}
+	Args         = Arguments{}
+	BitSizeRegex = regexp.MustCompile(`bit\((\d+)\)`)
 )
