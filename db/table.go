@@ -19,7 +19,8 @@ func GetDbTables(c *sql.DB) ([]string, error) {
 	SELECT table_name AS tableName
 	FROM information_schema.tables
 	WHERE table_schema = ?
-	  AND table_type = 'BASE TABLE'`,
+	  AND table_type = 'BASE TABLE'
+	ORDER BY table_name`,
 		conf.Args.DBName,
 	)
 	if err != nil {

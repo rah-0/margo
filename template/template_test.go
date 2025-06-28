@@ -1,0 +1,62 @@
+package template
+
+import (
+	"testing"
+
+	"github.com/rah-0/margo/db"
+)
+
+func TestTemplateStruct(t *testing.T) {
+	tfs, err := db.GetDbTableFields(conn, tableNames[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := TemplateStruct(tableNames[0], tfs)
+	if template != `type AllTypes struct {
+Id int
+TinySigned int
+TinyUnsigned uint
+SmallSigned int
+SmallUnsigned uint
+MediumSigned int
+MediumUnsigned uint
+IntSigned int
+IntUnsigned uint
+BigSigned int64
+BigUnsigned uint64
+FloatField float64
+DoubleField float64
+RealField float64
+DecimalField decimal.Decimal
+DecField decimal.Decimal
+NumericField decimal.Decimal
+FixedField decimal.Decimal
+Bit1 uint64
+Bit8 uint64
+Bit64 uint64
+BoolField int
+BooleanField int
+CharField string
+VarcharField string
+TextField string
+TinytextField string
+MediumtextField string
+LongtextField string
+EnumField string
+SetField string
+BinaryField []byte
+VarbinaryField []byte
+BlobField []byte
+TinyblobField []byte
+MediumblobField []byte
+LongblobField []byte
+DateField time.Time
+TimeField time.Time
+YearField time.Time
+DatetimeField time.Time
+TimestampField time.Time
+UuidField string
+}` {
+		t.Fatal("unexpected result:", template)
+	}
+}
