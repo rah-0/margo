@@ -2,7 +2,6 @@ package template
 
 import (
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/rah-0/margo/conf"
@@ -19,7 +18,7 @@ func CreateGoFile(rawTableName string, tfs []conf.TableField) error {
 func GetFileContent(rawTableName string, tfs []conf.TableField) string {
 	t := "package " + db.NormalizeString(rawTableName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImports(tfs)
+	t += GetImports()
 	t += GetConsts(rawTableName, tfs)
 	t += GetVars(tfs)
 	t += GetStruct(tfs)
@@ -37,36 +36,11 @@ func GetCommentWarning() string {
 `
 }
 
-func GetImports(tfs []conf.TableField) string {
-	importSet := map[string]struct{}{}
-	importSet[`"database/sql"`] = struct{}{}
-	importSet[`"strings"`] = struct{}{}
-	importSet[`"context"`] = struct{}{}
-
-	for _, tf := range tfs {
-		switch tf.GOType {
-		case "time.Time":
-			importSet[`"time"`] = struct{}{}
-		case "uuid.UUID":
-			importSet[`"github.com/google/uuid"`] = struct{}{}
-		case "decimal.Decimal":
-			importSet[`"github.com/shopspring/decimal"`] = struct{}{}
-		}
-	}
-
-	if len(importSet) == 0 {
-		return ""
-	}
-
+func GetImports() string {
 	imports := "import (\n"
-	var keys []string
-	for imp := range importSet {
-		keys = append(keys, imp)
-	}
-	sort.Strings(keys)
-	for _, imp := range keys {
-		imports += imp + "\n"
-	}
+	imports += `"context"` + "\n"
+	imports += `"database/sql"` + "\n"
+	imports += `"strings"` + "\n"
 	imports += ")\n\n"
 	return imports
 }
@@ -97,7 +71,7 @@ func GetVars(tfs []conf.TableField) string {
 func GetStruct(tfs []conf.TableField) string {
 	t := "type Entity struct {\n"
 	for _, tf := range tfs {
-		t += db.NormalizeString(tf.Name) + " " + tf.GOType + "\n"
+		t += db.NormalizeString(tf.Name) + " string\n"
 	}
 	t += "}\n\n"
 	return t
@@ -123,7 +97,7 @@ func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "return values"
 	t += "}\n\n"
 
-	t += "func (x *Entity) GetFieldPlaceholders(fieldList []string) []string {\n"
+	t += "func GetFieldPlaceholders(fieldList []string) []string {\n"
 	t += "placeholders := make([]string, 0, len(fieldList))\n\n"
 	t += "for _, field := range fieldList {\n"
 	t += "switch field {\n"
@@ -137,18 +111,78 @@ func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "return placeholders\n"
 	t += "}\n\n"
 
-	t += "func (x *Entity) GetFieldPlaceholdersWithName(fieldList []string) []string {\n"
+	t += "func GetFieldPlaceholdersWithName(fieldList []string) []string {\n"
 	t += "placeholders := make([]string, 0, len(fieldList))\n\n"
 	t += "for _, field := range fieldList {\n"
 	t += "switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
 		t += "case Field" + tfn + ":\n"
-		t += "placeholders = append(placeholders, Field" + tfn + " + \" = ?\")\n"
+		t += "placeholders = append(placeholders, \"`\" + Field" + tfn + " + \"` = ?\")\n"
 	}
 	t += "}\n"
 	t += "}\n\n"
 	t += "return placeholders\n"
+	t += "}\n\n"
+
+	t += "func GetBacktickedFields (fieldList []string) []string {\n"
+	t += "fields := make([]string, 0, len(fieldList))\n\n"
+	t += "for _, field := range fieldList {\n"
+	t += "switch field {\n"
+	for _, tf := range tfs {
+		tfn := db.NormalizeString(tf.Name)
+		t += "case Field" + tfn + ":\n"
+		t += "fields = append(fields, \"`\" + Field" + tfn + " + \"`\")\n"
+	}
+	t += "}\n"
+	t += "}\n\n"
+	t += "return fields\n"
+	t += "}\n\n"
+
+	t += "func scanRow(rows *sql.Rows) (Entity, error) {\n"
+	t += "var x Entity\n"
+	for _, tf := range tfs {
+		t += "var ptr" + db.NormalizeString(tf.Name) + " *string\n"
+	}
+	t += "err := rows.Scan(\n"
+	for _, tf := range tfs {
+		t += "&ptr" + db.NormalizeString(tf.Name) + ",\n"
+	}
+	t += ")\n"
+	t += "if err != nil {\nreturn x, err}\n"
+	for _, tf := range tfs {
+		tfn := db.NormalizeString(tf.Name)
+		t += "if ptr" + tfn + " != nil {\n"
+		t += "x." + tfn + " = *ptr" + tfn + "\n"
+		t += "} else {\n"
+		t += "x." + tfn + " = \"\"\n"
+		t += "}\n"
+	}
+	t += "return x, nil\n"
+	t += "}\n\n"
+
+	t += "func queryEntities(query string, args ...any) ([]Entity, error) {\n"
+	t += "rows, err := db.Query(query, args...)\n"
+	t += "if err != nil {\nreturn nil, err}\n"
+	t += "defer rows.Close()\n"
+	t += "var results []Entity\n"
+	t += "for rows.Next() {\n"
+	t += "x, err := scanRow(rows)\n"
+	t += "if err != nil {\nreturn results, err}\n"
+	t += "results = append(results, x)\n"
+	t += "}\nreturn results, nil\n"
+	t += "}\n\n"
+
+	t += "func queryEntitiesContext(ctx context.Context, query string, args ...any) ([]Entity, error) {\n"
+	t += "rows, err := db.QueryContext(ctx, query, args...)\n"
+	t += "if err != nil {\nreturn nil, err}\n"
+	t += "defer rows.Close()\n"
+	t += "var results []Entity\n"
+	t += "for rows.Next() {\n"
+	t += "x, err := scanRow(rows)\n"
+	t += "if err != nil {\nreturn results, err}\n"
+	t += "results = append(results, x)\n"
+	t += "}\nreturn results, nil\n"
 	t += "}\n\n"
 
 	t += ""
@@ -170,12 +204,12 @@ func GetDBFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBInsert(fieldsToInsert []string) (sql.Result, error) {\n"
-	t += "query := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(fieldsToInsert, \", \") + \") VALUES (\" + strings.Join(x.GetFieldPlaceholders(fieldsToInsert), \", \") + \")\"\n"
+	t += "query := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(fieldsToInsert, \", \") + \") VALUES (\" + strings.Join(GetFieldPlaceholders(fieldsToInsert), \", \") + \")\"\n"
 	t += "return db.Exec(query, x.GetFieldValues(fieldsToInsert)...)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBInsertContext(ctx context.Context, fieldsToInsert []string) (sql.Result, error) {\n"
-	t += "query := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(fieldsToInsert, \", \") + \") VALUES (\" + strings.Join(x.GetFieldPlaceholders(fieldsToInsert), \", \") + \")\"\n"
+	t += "query := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(fieldsToInsert, \", \") + \") VALUES (\" + strings.Join(GetFieldPlaceholders(fieldsToInsert), \", \") + \")\"\n"
 	t += "return db.ExecContext(ctx, query, x.GetFieldValues(fieldsToInsert)...)\n"
 	t += "}\n\n"
 
@@ -200,27 +234,131 @@ func GetDBFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBUpdateWhereAll(fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
-	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(x.GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? AND \") + \" = ?\"\n"
+	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? AND \") + \" = ?\"\n"
 	t += "values := append(x.GetFieldValues(fieldsToUpdate), x.GetFieldValues(fieldsToMatch)...)\n"
 	t += "return db.Exec(query, values...)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBUpdateWhereAllContext(ctx context.Context, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
-	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(x.GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? AND \") + \" = ?\"\n"
+	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? AND \") + \" = ?\"\n"
 	t += "values := append(x.GetFieldValues(fieldsToUpdate), x.GetFieldValues(fieldsToMatch)...)\n"
 	t += "return db.ExecContext(ctx, query, values...)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBUpdateWhereAny(fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
-	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(x.GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? OR \") + \" = ?\"\n"
+	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? OR \") + \" = ?\"\n"
 	t += "values := append(x.GetFieldValues(fieldsToUpdate), x.GetFieldValues(fieldsToMatch)...)\n"
 	t += "return db.Exec(query, values...)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBUpdateWhereAnyContext(ctx context.Context, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
-	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(x.GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? OR \") + \" = ?\"\n"
+	t += "query := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetFieldPlaceholdersWithName(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(fieldsToMatch, \" = ? OR \") + \" = ?\"\n"
 	t += "values := append(x.GetFieldValues(fieldsToUpdate), x.GetFieldValues(fieldsToMatch)...)\n"
 	t += "return db.ExecContext(ctx, query, values...)\n"
+	t += "}\n\n"
+
+	t += "func DBSelectAll() ([]Entity, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN\n"
+	t += "    return queryEntities(query)\n"
+	t += "}\n\n"
+
+	t += "func DBSelectAllContext(ctx context.Context) ([]Entity, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN\n"
+	t += "    return queryEntitiesContext(ctx, query)\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBSelectAllWhereAll(fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
+	t += "        \" WHERE \" + strings.Join(fieldsToMatch, \" = ? AND \") + \" = ?\"\n"
+	t += "    return queryEntities(query, x.GetFieldValues(fieldsToMatch)...)\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBSelectAllWhereAllContext(ctx context.Context, fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
+	t += "        \" WHERE \" + strings.Join(fieldsToMatch, \" = ? AND \") + \" = ?\"\n"
+	t += "    return queryEntitiesContext(ctx, query, x.GetFieldValues(fieldsToMatch)...)\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBSelectAllWhereAny(fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
+	t += "        \" WHERE \" + strings.Join(fieldsToMatch, \" = ? OR \") + \" = ?\"\n"
+	t += "    return queryEntities(query, x.GetFieldValues(fieldsToMatch)...)\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBSelectAllWhereAnyContext(ctx context.Context, fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
+	t += "        \" WHERE \" + strings.Join(fieldsToMatch, \" = ? OR \") + \" = ?\"\n"
+	t += "    return queryEntitiesContext(ctx, query, x.GetFieldValues(fieldsToMatch)...)\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBExists(fields []string) (bool, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") +\n"
+	t += "        \" FROM \" + FQTN + \" WHERE \" + strings.Join(fields, \" = ? AND \") + \" = ? LIMIT 1\"\n"
+	t += "    results, err := queryEntities(query, x.GetFieldValues(fields)...)\n"
+	t += "    if err != nil {\n"
+	t += "        return false, err\n"
+	t += "    }\n"
+	t += "    if len(results) == 0 {\n"
+	t += "        return false, nil\n"
+	t += "    }\n"
+	t += "    *x = results[0]\n"
+	t += "    return true, nil\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBExistsContext(ctx context.Context, fields []string) (bool, error) {\n"
+	t += "    query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") +\n"
+	t += "        \" FROM \" + FQTN + \" WHERE \" + strings.Join(fields, \" = ? AND \") + \" = ? LIMIT 1\"\n"
+	t += "    results, err := queryEntitiesContext(ctx, query, x.GetFieldValues(fields)...)\n"
+	t += "    if err != nil {\n"
+	t += "        return false, err\n"
+	t += "    }\n"
+	t += "    if len(results) == 0 {\n"
+	t += "        return false, nil\n"
+	t += "    }\n"
+	t += "    *x = results[0]\n"
+	t += "    return true, nil\n"
+	t += "}\n\n"
+
+	t += "func DBCountAll() (int, error) {\n"
+	t += "    query := \"SELECT COUNT(*) FROM \" + FQTN\n"
+	t += "    var count int\n"
+	t += "    err := db.QueryRow(query).Scan(&count)\n"
+	t += "    return count, err\n"
+	t += "}\n\n"
+
+	t += "func DBCountAllContext(ctx context.Context) (int, error) {\n"
+	t += "    query := \"SELECT COUNT(*) FROM \" + FQTN\n"
+	t += "    var count int\n"
+	t += "    err := db.QueryRowContext(ctx, query).Scan(&count)\n"
+	t += "    return count, err\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBCountWhereAll(fields []string) (int, error) {\n"
+	t += "    query := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(fields, \" = ? AND \") + \" = ?\"\n"
+	t += "    var count int\n"
+	t += "    err := db.QueryRow(query, x.GetFieldValues(fields)...).Scan(&count)\n"
+	t += "    return count, err\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBCountWhereAllContext(ctx context.Context, fields []string) (int, error) {\n"
+	t += "    query := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(fields, \" = ? AND \") + \" = ?\"\n"
+	t += "    var count int\n"
+	t += "    err := db.QueryRowContext(ctx, query, x.GetFieldValues(fields)...).Scan(&count)\n"
+	t += "    return count, err\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBCountWhereAny(fields []string) (int, error) {\n"
+	t += "    query := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(fields, \" = ? OR \") + \" = ?\"\n"
+	t += "    var count int\n"
+	t += "    err := db.QueryRow(query, x.GetFieldValues(fields)...).Scan(&count)\n"
+	t += "    return count, err\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBCountWhereAnyContext(ctx context.Context, fields []string) (int, error) {\n"
+	t += "    query := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(fields, \" = ? OR \") + \" = ?\"\n"
+	t += "    var count int\n"
+	t += "    err := db.QueryRowContext(ctx, query, x.GetFieldValues(fields)...).Scan(&count)\n"
+	t += "    return count, err\n"
 	t += "}\n\n"
 
 	return t

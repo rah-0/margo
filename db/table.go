@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/camelcase"
@@ -98,65 +97,8 @@ func GetDbTableFields(c *sql.DB, tableName string) ([]conf.TableField, error) {
 			Name:       columnName,
 			DataType:   dataType,
 			ColumnType: columnType,
-			GOType:     IdentifyGOType(dataType, columnType),
 		})
 	}
 
 	return tfs, nil
-}
-
-func IdentifyGOType(dataType, columnType string) string {
-	dt := strings.ToLower(dataType)
-	ct := strings.ToLower(columnType)
-	isUnsigned := strings.Contains(ct, "unsigned")
-
-	switch dt {
-	case "tinyint", "smallint", "mediumint", "int", "integer":
-		if isUnsigned {
-			return "uint"
-		}
-		return "int"
-	case "bigint":
-		if isUnsigned {
-			return "uint64"
-		}
-		return "int64"
-	case "float", "double", "real":
-		return "float64"
-	case "decimal", "dec", "numeric", "fixed":
-		return "decimal.Decimal"
-	case "bit":
-		m := conf.BitSizeRegex.FindStringSubmatch(ct)
-		if len(m) == 2 {
-			bitSize, _ := strconv.Atoi(m[1])
-			switch {
-			case bitSize == 1:
-				return "bool"
-			case bitSize <= 64:
-				return "uint64"
-			default:
-				return "[]byte"
-			}
-		}
-		return "uint64"
-	case "bool", "boolean":
-		return "bool"
-	case "char":
-		if ct == "char(36)" {
-			return "uuid.UUID"
-		}
-		return "string"
-	case "binary":
-		return "[]byte"
-	case "varchar", "text", "tinytext", "mediumtext", "longtext", "enum", "set":
-		return "string"
-	case "varbinary", "blob", "tinyblob", "mediumblob", "longblob":
-		return "[]byte"
-	case "date", "time", "year", "datetime", "timestamp":
-		return "time.Time"
-	case "uuid":
-		return "uuid.UUID"
-	}
-
-	panic("unhandled DB type: " + dataType + " (" + columnType + ")")
 }

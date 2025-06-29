@@ -13,5 +13,4 @@ type TableField struct {
 	Name       string
 	DataType   string
 	ColumnType string
-	GOType     string
 }
