@@ -51,5 +51,6 @@ CREATE TABLE `alpha` (
  `LastUpdate` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
  `Animal` varchar(255) NOT NULL DEFAULT '',
  `BigNumber` bigint(20) unsigned DEFAULT NULL,
+ `test_field` varchar(20) DEFAULT NULL,
  PRIMARY KEY (`Uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPACT;
