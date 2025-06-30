@@ -13,13 +13,13 @@ import (
 var (
 	tableNames []string
 	conn       *sql.DB
-	err        error
 )
 
 func TestMain(m *testing.M) {
 	testutil.TestMainWrapper(testutil.TestConfig{
 		M: m,
 		LoadResources: func() error {
+			var err error
 			conf.CheckFlags()
 
 			conn, err = db.Connect()

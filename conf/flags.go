@@ -15,6 +15,7 @@ func CheckFlags() {
 	dbIp := flag.String("dbIp", "", "Required")
 	dbPort := flag.String("dbPort", "3306", "Required")
 	outputPath := flag.String("outputPath", "", "Required: path where .go files will be created.")
+	queriesPath := flag.String("queriesPath", "", "Optional: path for the file where SQL queries located.")
 	flag.Parse()
 
 	var missing []string
@@ -53,4 +54,5 @@ func CheckFlags() {
 	Args.DBIp = *dbIp
 	Args.DBPort = *dbPort
 	Args.OutputPath = *outputPath
+	Args.QueriesPath = *queriesPath // can be empty
 }

@@ -9,13 +9,13 @@ import (
 	"github.com/rah-0/margo/util"
 )
 
-func CreateGoFile(rawTableName string, tfs []conf.TableField) error {
+func CreateGoFileEntity(rawTableName string, tfs []conf.TableField) error {
 	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), db.NormalizeString(rawTableName), "entity.go")
-	c := GetFileContent(rawTableName, tfs)
+	c := GetFileContentEntity(rawTableName, tfs)
 	return util.WriteGoFile(p, c)
 }
 
-func GetFileContent(rawTableName string, tfs []conf.TableField) string {
+func GetFileContentEntity(rawTableName string, tfs []conf.TableField) string {
 	t := "package " + db.NormalizeString(rawTableName) + "\n\n"
 	t += GetCommentWarning()
 	t += GetImports()
@@ -82,9 +82,8 @@ func GetStruct(tfs []conf.TableField) string {
 
 func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	t := "func SetDB(x *sql.DB) {\n"
-	t += "if x != nil {\n"
 	t += "db = x\n"
-	t += "}\n}\n\n"
+	t += "}\n\n"
 
 	t += "func (x *Entity) GetFieldValues(fieldList []string) []any {\n"
 	t += "values := make([]any, 0, len(fieldList))\n\n"
