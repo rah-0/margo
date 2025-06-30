@@ -52,9 +52,8 @@ func GetImportsQueries() string {
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
-	imports += `"strings"` + "\n"
-	imports += `"sync"` + "\n"
 	imports += `"encoding/base64"` + "\n"
+	imports += `"sync"` + "\n"
 	imports += ")\n\n"
 	return imports
 }

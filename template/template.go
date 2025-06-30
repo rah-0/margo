@@ -23,7 +23,7 @@ func GetFileContentEntity(rawTableName string, tfs []conf.TableField) string {
 	t += GetVars(tfs)
 	t += GetStruct(tfs)
 	t += GetGeneralFunctions(rawTableName, tfs)
-	t += GetDBFunctions(rawTableName, tfs)
+	t += GetDBFunctions()
 
 	return t
 }
@@ -58,16 +58,28 @@ func GetConsts(rawTableName string, tfs []conf.TableField) string {
 
 func GetVars(tfs []conf.TableField) string {
 	var fieldList []string
-	for _, tf := range tfs {
-		fieldList = append(fieldList, "Field"+db.NormalizeString(tf.Name))
-	}
 
 	t := "var (\n"
-	t += "Fields = []string{" + strings.Join(fieldList, ",") + "}\n"
+	for _, tf := range tfs {
+		name := "Field" + db.NormalizeString(tf.Name)
+		fieldList = append(fieldList, name)
+	}
+	t += "Fields = []string{" + strings.Join(fieldList, ", ") + "}\n"
+	t += "FieldsPlaceholders = map[string]string{\n"
+	for _, name := range fieldList {
+		t += "\t" + name + ": \"?\",\n"
+	}
+	t += "}\n"
+	t += "FieldsPlaceholdersWithName = map[string]string{\n"
+	for _, name := range fieldList {
+		t += "\t" + name + ": \"`\" + " + name + " + \"` = ?\",\n"
+	}
+	t += "}\n"
 	t += "db *sql.DB\n"
 	t += "stmtMu sync.RWMutex\n"
 	t += "stmtCache = make(map[string]*sql.Stmt)\n"
 	t += ")\n\n"
+
 	return t
 }
 
@@ -102,12 +114,8 @@ func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "func GetFieldPlaceholders(fieldList []string) []string {\n"
 	t += "placeholders := make([]string, 0, len(fieldList))\n\n"
 	t += "for _, field := range fieldList {\n"
-	t += "switch field {\n"
-	for _, tf := range tfs {
-		tfn := db.NormalizeString(tf.Name)
-		t += "case Field" + tfn + ":\n"
-		t += "placeholders = append(placeholders, \"?\")\n"
-	}
+	t += "if p, ok := FieldsPlaceholders[field]; ok {\n"
+	t += "placeholders = append(placeholders, p)\n"
 	t += "}\n"
 	t += "}\n\n"
 	t += "return placeholders\n"
@@ -116,12 +124,8 @@ func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "func GetFieldPlaceholdersWithName(fieldList []string) []string {\n"
 	t += "placeholders := make([]string, 0, len(fieldList))\n\n"
 	t += "for _, field := range fieldList {\n"
-	t += "switch field {\n"
-	for _, tf := range tfs {
-		tfn := db.NormalizeString(tf.Name)
-		t += "case Field" + tfn + ":\n"
-		t += "placeholders = append(placeholders, \"`\" + Field" + tfn + " + \"` = ?\")\n"
-	}
+	t += "if p, ok := FieldsPlaceholdersWithName[field]; ok {\n"
+	t += "placeholders = append(placeholders, p)\n"
 	t += "}\n"
 	t += "}\n\n"
 	t += "return placeholders\n"
@@ -201,7 +205,7 @@ func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	return t
 }
 
-func GetDBFunctions(rawTableName string, tfs []conf.TableField) string {
+func GetDBFunctions() string {
 	t := ""
 
 	t += "func DBTruncate() (sql.Result, error) {\n"
