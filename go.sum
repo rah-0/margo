@@ -10,5 +10,3 @@ github.com/rah-0/nabu v0.0.5 h1:z0b7+8uk2FNjge/s5YnWuG6A9S7G10U2hJUZKKEmH10=
 github.com/rah-0/nabu v0.0.5/go.mod h1:MCTYZOSPbh+wkJHyqqE699jD0ap3keq9rBuX9kq6FzQ=
 github.com/rah-0/testmark v1.0.3 h1:atEz+nVvicl2H6yG8uswLVzOxlBI83cdB79dDDcGGjI=
 github.com/rah-0/testmark v1.0.3/go.mod h1:Pq7ko2/Ige3A7KDOlk7PDvAEdlXNAa15HVh9U/Hxy+E=
-github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp81k=
-github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
