@@ -82,63 +82,63 @@ func GetStruct(tfs []conf.TableField) string {
 
 func GetGeneralFunctions(tfs []conf.TableField) string {
 	t := "func SetDB(x *sql.DB) {\n"
-	t += "db = x\n"
+	t += "	db = x\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) GetFieldValues(fieldList []string) []any {\n"
-	t += "values := make([]any, 0, len(fieldList))\n\n"
-	t += "for _, field := range fieldList {\n"
-	t += "switch field {\n"
+	t += "	values := make([]any, 0, len(fieldList))\n\n"
+	t += "	for _, field := range fieldList {\n"
+	t += "		switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "case Field" + tfn + ":\n"
-		t += "values = append(values, x." + tfn + ")\n"
+		t += "		case Field" + tfn + ":\n"
+		t += "			values = append(values, x." + tfn + ")\n"
 	}
-	t += "}\n"
-	t += "}\n\n"
-	t += "return values"
+	t += "		}\n"
+	t += "	}\n\n"
+	t += "	return values\n"
 	t += "}\n\n"
 
 	t += "func GetFieldPlaceholders(fieldList []string) []string {\n"
-	t += "placeholders := make([]string, 0, len(fieldList))\n\n"
-	t += "for _, field := range fieldList {\n"
-	t += "switch field {\n"
+	t += "	placeholders := make([]string, 0, len(fieldList))\n\n"
+	t += "	for _, field := range fieldList {\n"
+	t += "		switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "case Field" + tfn + ":\n"
-		t += "placeholders = append(placeholders, \"?\")\n"
+		t += "		case Field" + tfn + ":\n"
+		t += "			placeholders = append(placeholders, \"?\")\n"
 	}
-	t += "}\n"
-	t += "}\n\n"
-	t += "return placeholders\n"
+	t += "		}\n"
+	t += "	}\n\n"
+	t += "	return placeholders\n"
 	t += "}\n\n"
 
 	t += "func GetFieldPlaceholdersWithName(fieldList []string) []string {\n"
-	t += "placeholders := make([]string, 0, len(fieldList))\n\n"
-	t += "for _, field := range fieldList {\n"
-	t += "switch field {\n"
+	t += "	placeholders := make([]string, 0, len(fieldList))\n\n"
+	t += "	for _, field := range fieldList {\n"
+	t += "		switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "case Field" + tfn + ":\n"
-		t += "placeholders = append(placeholders, \"`\" + Field" + tfn + " + \"` = ?\")\n"
+		t += "		case Field" + tfn + ":\n"
+		t += "			placeholders = append(placeholders, \"`\" + Field" + tfn + " + \"` = ?\")\n"
 	}
-	t += "}\n"
-	t += "}\n\n"
-	t += "return placeholders\n"
+	t += "		}\n"
+	t += "	}\n\n"
+	t += "	return placeholders\n"
 	t += "}\n\n"
 
-	t += "func GetBacktickedFields (fieldList []string) []string {\n"
-	t += "fields := make([]string, 0, len(fieldList))\n\n"
-	t += "for _, field := range fieldList {\n"
-	t += "switch field {\n"
+	t += "func GetBacktickedFields(fieldList []string) []string {\n"
+	t += "	fields := make([]string, 0, len(fieldList))\n\n"
+	t += "	for _, field := range fieldList {\n"
+	t += "		switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "case Field" + tfn + ":\n"
-		t += "fields = append(fields, \"`\" + Field" + tfn + " + \"`\")\n"
+		t += "		case Field" + tfn + ":\n"
+		t += "			fields = append(fields, \"`\" + Field" + tfn + " + \"`\")\n"
 	}
-	t += "}\n"
-	t += "}\n\n"
-	t += "return fields\n"
+	t += "		}\n"
+	t += "	}\n\n"
+	t += "	return fields\n"
 	t += "}\n\n"
 
 	t += "func getPreparedStmt(query string) (*sql.Stmt, error) {\n"
@@ -161,31 +161,33 @@ func GetGeneralFunctions(tfs []conf.TableField) string {
 	t += "	return stmt, nil\n"
 	t += "}\n\n"
 
-	t += "func scanRow(rows *sql.Rows) (Entity, error) {\n"
-	t += "var x Entity\n"
+	t += "func scanRow(rows *sql.Rows) (*Entity, error) {\n"
+	t += "	x := &Entity{}\n"
 	for _, tf := range tfs {
-		t += "var ptr" + db.NormalizeString(tf.Name) + " *string\n"
+		t += "	var ptr" + db.NormalizeString(tf.Name) + " *string\n"
 	}
-	t += "err := rows.Scan(\n"
+	t += "	err := rows.Scan(\n"
 	for _, tf := range tfs {
-		t += "&ptr" + db.NormalizeString(tf.Name) + ",\n"
+		t += "		&ptr" + db.NormalizeString(tf.Name) + ",\n"
 	}
-	t += ")\n"
-	t += "if err != nil {\nreturn x, err}\n"
+	t += "	)\n"
+	t += "	if err != nil {\n"
+	t += "		return nil, err\n"
+	t += "	}\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "if ptr" + tfn + " != nil {\n"
-		t += "x." + tfn + " = *ptr" + tfn + "\n"
-		t += "} else {\n"
-		t += "x." + tfn + " = \"\"\n"
-		t += "}\n"
+		t += "	if ptr" + tfn + " != nil {\n"
+		t += "		x." + tfn + " = *ptr" + tfn + "\n"
+		t += "	} else {\n"
+		t += "		x." + tfn + " = \"\"\n"
+		t += "	}\n"
 	}
-	t += "return x, nil\n"
+	t += "	return x, nil\n"
 	t += "}\n\n"
 
-	t += "func readRows(rows *sql.Rows) ([]Entity, error) {\n"
+	t += "func readRows(rows *sql.Rows) ([]*Entity, error) {\n"
 	t += "	defer rows.Close()\n"
-	t += "	var results []Entity\n"
+	t += "	var results []*Entity\n"
 	t += "	for rows.Next() {\n"
 	t += "		x, err := scanRow(rows)\n"
 	t += "		if err != nil {\n"
@@ -195,8 +197,6 @@ func GetGeneralFunctions(tfs []conf.TableField) string {
 	t += "	}\n"
 	t += "	return results, nil\n"
 	t += "}\n\n"
-
-	t += ""
 
 	return t
 }
@@ -316,7 +316,7 @@ func GetDBFunctions() string {
 	t += "	return stmt.ExecContext(ctx, values...)\n"
 	t += "}\n\n"
 
-	t += "func DBSelectAll() ([]Entity, error) {\n"
+	t += "func DBSelectAll() ([]*Entity, error) {\n"
 	t += "	query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
 	t += "	if err != nil {\n"
@@ -330,7 +330,7 @@ func GetDBFunctions() string {
 	t += "	return readRows(rows)\n"
 	t += "}\n\n"
 
-	t += "func DBSelectAllContext(ctx context.Context) ([]Entity, error) {\n"
+	t += "func DBSelectAllContext(ctx context.Context) ([]*Entity, error) {\n"
 	t += "	query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
 	t += "	if err != nil {\n"
@@ -344,7 +344,7 @@ func GetDBFunctions() string {
 	t += "	return readRows(rows)\n"
 	t += "}\n\n"
 
-	t += "func (x *Entity) DBSelectAllWhereAll(fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "func (x *Entity) DBSelectAllWhereAll(fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
 	t += "		\" WHERE \" + strings.Join(GetBacktickedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
@@ -359,7 +359,7 @@ func GetDBFunctions() string {
 	t += "	return readRows(rows)\n"
 	t += "}\n\n"
 
-	t += "func (x *Entity) DBSelectAllWhereAllContext(ctx context.Context, fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "func (x *Entity) DBSelectAllWhereAllContext(ctx context.Context, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
 	t += "		\" WHERE \" + strings.Join(GetBacktickedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
@@ -374,7 +374,7 @@ func GetDBFunctions() string {
 	t += "	return readRows(rows)\n"
 	t += "}\n\n"
 
-	t += "func (x *Entity) DBSelectAllWhereAny(fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "func (x *Entity) DBSelectAllWhereAny(fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
 	t += "		\" WHERE \" + strings.Join(GetBacktickedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
@@ -389,7 +389,7 @@ func GetDBFunctions() string {
 	t += "	return readRows(rows)\n"
 	t += "}\n\n"
 
-	t += "func (x *Entity) DBSelectAllWhereAnyContext(ctx context.Context, fieldsToMatch []string) ([]Entity, error) {\n"
+	t += "func (x *Entity) DBSelectAllWhereAnyContext(ctx context.Context, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	query := \"SELECT \" + strings.Join(GetBacktickedFields(Fields), \", \") + \" FROM \" + FQTN +\n"
 	t += "		\" WHERE \" + strings.Join(GetBacktickedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
@@ -423,7 +423,7 @@ func GetDBFunctions() string {
 	t += "	if len(results) == 0 {\n"
 	t += "		return false, nil\n"
 	t += "	}\n"
-	t += "	*x = results[0]\n"
+	t += "	*x = *results[0]\n"
 	t += "	return true, nil\n"
 	t += "}\n\n"
 
@@ -446,7 +446,7 @@ func GetDBFunctions() string {
 	t += "	if len(results) == 0 {\n"
 	t += "		return false, nil\n"
 	t += "	}\n"
-	t += "	*x = results[0]\n"
+	t += "	*x = *results[0]\n"
 	t += "	return true, nil\n"
 	t += "}\n\n"
 
