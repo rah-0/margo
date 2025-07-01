@@ -53,4 +53,12 @@ CREATE TABLE `alpha` (
  `BigNumber` bigint(20) unsigned DEFAULT NULL,
  `test_field` varchar(20) DEFAULT NULL,
  PRIMARY KEY (`Uuid`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPACT;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `beta` (
+  `first_insert` datetime(6) NOT NULL DEFAULT current_timestamp(6),
+  `last_update` datetime(6) NOT NULL DEFAULT current_timestamp(6) ON UPDATE current_timestamp(6),
+  `uuid` uuid NOT NULL DEFAULT uuid_v4(),
+  `name` varchar(191) NOT NULL DEFAULT '',
+  PRIMARY KEY (`uuid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci:
