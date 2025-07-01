@@ -18,8 +18,23 @@ func main() {
 	}
 	defer conn.Close()
 
+	if err = template.PathCreateOutputDir(); err != nil {
+		nabu.FromError(err).WithLevelFatal().Log()
+		return
+	}
+
+	if err = template.PathCreateDBDir(); err != nil {
+		nabu.FromError(err).WithLevelFatal().Log()
+		return
+	}
+
 	tableNames, err := db.GetDbTables(conn)
 	if err != nil {
+		nabu.FromError(err).WithLevelFatal().Log()
+		return
+	}
+
+	if err = template.PathCreateTableDirs(tableNames); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
 		return
 	}
