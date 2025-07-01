@@ -22,8 +22,8 @@ func GetFileContentEntity(rawTableName string, tfs []conf.TableField) string {
 	t += GetConsts(rawTableName, tfs)
 	t += GetVars(tfs)
 	t += GetStruct(tfs)
-	t += GetGeneralFunctions(rawTableName, tfs)
-	t += GetDBFunctions(rawTableName, tfs)
+	t += GetGeneralFunctions(tfs)
+	t += GetDBFunctions()
 
 	return t
 }
@@ -80,7 +80,7 @@ func GetStruct(tfs []conf.TableField) string {
 	return t
 }
 
-func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
+func GetGeneralFunctions(tfs []conf.TableField) string {
 	t := "func SetDB(x *sql.DB) {\n"
 	t += "db = x\n"
 	t += "}\n\n"
@@ -201,7 +201,7 @@ func GetGeneralFunctions(rawTableName string, tfs []conf.TableField) string {
 	return t
 }
 
-func GetDBFunctions(rawTableName string, tfs []conf.TableField) string {
+func GetDBFunctions() string {
 	t := ""
 
 	t += "func DBTruncate() (sql.Result, error) {\n"
@@ -492,6 +492,44 @@ func GetDBFunctions(rawTableName string, tfs []conf.TableField) string {
 	t += "	var count int\n"
 	t += "	err = stmt.QueryRowContext(ctx, x.GetFieldValues(fields)...).Scan(&count)\n"
 	t += "	return count, err\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBFindOrCreate(fields []string) error {\n"
+	t += "	exists, err := x.DBExists(fields)\n"
+	t += "	if err != nil {\n"
+	t += "		return err\n"
+	t += "	}\n"
+	t += "	if exists {\n"
+	t += "		return nil\n"
+	t += "	}\n"
+	t += "	_, err = x.DBInsert(fields)\n"
+	t += "	if err != nil {\n"
+	t += "		return err\n"
+	t += "	}\n"
+	t += "	_, err = x.DBExists(fields)\n"
+	t += "	if err != nil {\n"
+	t += "		return err\n"
+	t += "	}\n"
+	t += "	return nil\n"
+	t += "}\n\n"
+
+	t += "func (x *Entity) DBFindOrCreateContext(ctx context.Context, fields []string) error {\n"
+	t += "	exists, err := x.DBExistsContext(ctx, fields)\n"
+	t += "	if err != nil {\n"
+	t += "		return err\n"
+	t += "	}\n"
+	t += "	if exists {\n"
+	t += "		return nil\n"
+	t += "	}\n"
+	t += "	_, err = x.DBInsertContext(ctx, fields)\n"
+	t += "	if err != nil {\n"
+	t += "		return err\n"
+	t += "	}\n"
+	t += "	_, err = x.DBExistsContext(ctx, fields)\n"
+	t += "	if err != nil {\n"
+	t += "		return err\n"
+	t += "	}\n"
+	t += "	return nil\n"
 	t += "}\n\n"
 
 	return t
