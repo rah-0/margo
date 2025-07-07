@@ -68,7 +68,7 @@ MarGO allows you to define custom SQL queries that will be transformed into type
 ### Requirements
 
 - All custom queries must be in a single file (specified by `-queriesPath`)
-- Each custom query must be prefixed with `-- Name: FunctionName`, [example](https://github.com/rah-0/margo/blob/master/doc/sql/queries.sql#L1). The generated function will look like [this](https://github.com/rah-0/margo-test/blob/master/dbs/Template/queries.go#L78).
+- Each custom query must be prefixed with `-- Name: FunctionName`, [example](https://github.com/rah-0/margo/blob/master/doc/sql/queries.sql#L1). The generated function will look like [this](https://github.com/rah-0/margo-test/blob/master/dbs/Template/queries.go#L78)
 - Queries must end with a semicolon (`;`) and be separated by at least one newline
 - No `SELECT *` queries are allowed, you must explicitly specify columns
 
