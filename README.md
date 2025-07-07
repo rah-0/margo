@@ -103,7 +103,7 @@ func main() {
 
 ## How It Works
 
-MarGO works differently from traditional ORMs:
+MarGO works in a single direction, from **Database** to **Code**:
 
 1. It connects to your MariaDB database and reads the schema information
 2. For each table, it generates a Go file with:
