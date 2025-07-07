@@ -25,6 +25,18 @@ MarGO (MariaDB + GO) is a code generator that creates type-safe database interac
 - **Minimal Dependencies**: Lightweight with few external dependencies
 - **No Nil Pointer Errors**: Safely handles NULL database fields by sanitizing them to empty strings, preventing the common nil pointer errors that could occur
 
+## How It Works
+
+MarGO works in a single direction, from **Database** to **Code**:
+
+1. It connects to your MariaDB database and reads the schema information
+2. For each table, it generates a Go file with:
+   - A struct representing the table
+   - Constants for field names
+   - Type-safe CRUD and some pre-defined general functions
+   - Prepared statement caching
+3. The generated code uses standard `database/sql` operations
+
 ## Getting Started
 
 ### Installation
@@ -100,18 +112,6 @@ func main() {
     // ...
 }
 ```
-
-## How It Works
-
-MarGO works in a single direction, from **Database** to **Code**:
-
-1. It connects to your MariaDB database and reads the schema information
-2. For each table, it generates a Go file with:
-   - A struct representing the table
-   - Constants for field names
-   - Type-safe CRUD and some pre-defined general functions
-   - Prepared statement caching
-3. The generated code uses standard `database/sql` operations
 
 ## Generated Code
 
