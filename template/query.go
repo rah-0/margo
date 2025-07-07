@@ -16,44 +16,56 @@ import (
 
 var selectStarRegex = regexp.MustCompile(`(?i)select\s*\*`)
 
-func CreateGoFileQueries() error {
+func CreateGoFileQueries(tns []string) error {
 	if conf.Args.QueriesPath == "" {
 		return nil
 	}
+
+	pathModuleOutput, err := util.GetGoModuleImportPath(conf.Args.OutputPath)
+	if err != nil {
+		return nabu.FromError(err).WithArgs(conf.Args.OutputPath).Log()
+	}
+	pathModuleOutput = filepath.Join(pathModuleOutput, db.NormalizeString(conf.Args.DBName))
+
 	fq, err := util.ReadFileAsString(conf.Args.QueriesPath)
 	if err != nil {
 		return nabu.FromError(err).WithArgs(conf.Args.QueriesPath).Log()
 	}
+
 	qs := SplitSQLQueries(fq)
 	if err = CheckNoSelectStar(qs); err != nil {
 		return nabu.FromError(err).WithArgs(fq).Log()
 	}
+
 	nqs := ExtractNamedQueries(qs)
 
 	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), "queries.go")
-	c := GetFileContentQueries(nqs)
+	c := GetFileContentQueries(pathModuleOutput, tns, nqs)
 
 	return util.WriteGoFile(p, c)
 }
 
-func GetFileContentQueries(nqs []conf.NamedQuery) string {
+func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
 	t := "package " + db.NormalizeString(conf.Args.DBName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImportsQueries()
+	t += GetImportsQueries(pathModuleOutput, tns)
 	t += GetVarsQueries(nqs)
 	t += GetStructsQueries()
-	t += GetGeneralFunctionsQueries()
+	t += GetGeneralFunctionsQueries(tns)
 	t += GetDBFunctionsQueries(nqs)
-
 	return t
 }
 
-func GetImportsQueries() string {
+func GetImportsQueries(pathModuleOutput string, tns []string) string {
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
-	imports += `"sync"` + "\n"
 	imports += `"encoding/base64"` + "\n"
+	imports += `"sync"` + "\n\n"
+	for _, tn := range tns {
+		pathModuleTable := filepath.Join(pathModuleOutput, db.NormalizeString(tn))
+		imports += `"` + pathModuleTable + `"` + "\n"
+	}
 	imports += ")\n\n"
 	return imports
 }
@@ -172,7 +184,7 @@ func GetVarsQueries(nqs []conf.NamedQuery) string {
 	return t
 }
 
-func GetGeneralFunctionsQueries() string {
+func GetGeneralFunctionsQueries(tns []string) string {
 	t := "func SetDB(x *sql.DB) error {\n"
 	t += "db = x\n\n"
 	t += "for _, q := range queries {\n"
@@ -182,7 +194,10 @@ func GetGeneralFunctionsQueries() string {
 	t += "}\n"
 	t += "q.Query = string(b)\n"
 	t += "}\n\n"
-	t += "return nil\n"
+	for _, tn := range tns {
+		t += db.NormalizeString(tn) + ".SetDB(x)\n"
+	}
+	t += "\nreturn nil\n"
 	t += "}\n\n"
 
 	t += "func getPreparedStmt(query string) (*sql.Stmt, error) {\n"

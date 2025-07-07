@@ -51,7 +51,7 @@ func main() {
 		}
 	}
 
-	if err := template.CreateGoFileQueries(); err != nil {
+	if err := template.CreateGoFileQueries(tableNames); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
 		return
 	}

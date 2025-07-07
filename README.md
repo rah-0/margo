@@ -13,7 +13,7 @@ MarGO (MariaDB + GO) is a code generator that creates type-safe database interac
 
 ## Features
 
-- **Reflection-free Design**: Unlike most ORMs, MarGO doesn't use reflection at runtime, eliminating that performance cost
+- **Reflection-free Design**: MarGO doesn't use reflection at runtime, eliminating that performance cost
 - **Code Generation**: Automatically generates Go code from your database schema
 - **Prepared Statement Caching**: Improves performance by reusing prepared statements
 - **Direct Table Mapping**: Maps database tables directly to Go structs without complex abstractions
@@ -21,7 +21,7 @@ MarGO (MariaDB + GO) is a code generator that creates type-safe database interac
 - **Strongly Typed**: Generated code is type-safe
 - **Near-Raw SQL Performance**: Benchmarks show performance within 99-105% of raw SQL
 - **Minimal Dependencies**: Lightweight with few external dependencies
-- **No Nil Pointer Errors**: Safely handles NULL database fields by sanitizing them to empty strings, preventing the common nil pointer errors that occur in other ORMs
+- **No Nil Pointer Errors**: Safely handles NULL database fields by sanitizing them to empty strings, preventing the common nil pointer errors that could occur
 
 ## Getting Started
 
@@ -66,19 +66,9 @@ MarGO allows you to define custom SQL queries that will be transformed into type
 ### Requirements
 
 - All custom queries must be in a single file (specified by `-queriesPath`)
-- Each query must be prefixed with `-- Name: FunctionName` which will be the name of the generated Go function
+- Each custom query must be prefixed with `-- Name: FunctionName`, [example](https://github.com/rah-0/margo/blob/master/doc/sql/queries.sql#L1). The generated function will look like [this](https://github.com/rah-0/margo-test/blob/master/dbs/Template/queries.go#L78).
 - Queries must end with a semicolon (`;`) and be separated by at least one newline
 - No `SELECT *` queries are allowed, you must explicitly specify columns
-
-### Example
-
-```sql
--- Name: GetUsersByRole
-SELECT id, username, email FROM users WHERE role = ?;
-
--- Name: CountActiveUsers
-SELECT COUNT(*) as count FROM users WHERE status = 'active';
-```
 
 ### Using Generated Query Functions
 
@@ -99,11 +89,12 @@ func main() {
     
     // Set the database connection for the generated packages
     yourDatabase.SetDB(db)
+    // If you have custom queries the next lines aren't needed
     yourDatabaseEntityA.SetDB(db)
     yourDatabaseEntityB.SetDB(db)
     
     // Now you can use your custom query
-    users, err := yourDatabase.GetUsersByRole("admin")
+    users, err := yourDatabase.QueryFunctionName("admin")
     // ...
 }
 ```
@@ -116,9 +107,9 @@ MarGO works differently from traditional ORMs:
 2. For each table, it generates a Go file with:
    - A struct representing the table
    - Constants for field names
-   - Type-safe CRUD functions
+   - Type-safe CRUD and some pre-defined general functions
    - Prepared statement caching
-3. The generated code uses standard `database/sql` operations without reflection
+3. The generated code uses standard `database/sql` operations
 
 ## Generated Code
 

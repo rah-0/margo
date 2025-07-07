@@ -88,3 +88,41 @@ func TestWriteGoFile(t *testing.T) {
 		}
 	})
 }
+
+func TestGetGoModuleImportPath(t *testing.T) {
+	tmpRoot, err := os.MkdirTemp("", "gomodtest")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpRoot)
+
+	moduleName := "github.com/example/project"
+
+	// Create go.mod file at root
+	goModPath := filepath.Join(tmpRoot, "go.mod")
+	goModContent := "module " + moduleName + "\n"
+	if err := os.WriteFile(goModPath, []byte(goModContent), 0644); err != nil {
+		t.Fatalf("failed to write go.mod: %v", err)
+	}
+
+	// Create nested directories: /a/b/c
+	nestedPath := filepath.Join(tmpRoot, "a", "b", "c")
+	if err := os.MkdirAll(nestedPath, 0755); err != nil {
+		t.Fatalf("failed to create nested dirs: %v", err)
+	}
+
+	importPath, err := GetGoModuleImportPath(nestedPath)
+	if err != nil {
+		t.Fatalf("unexpected error from GetGoModuleImportPath: %v", err)
+	}
+
+	expectedSuffix := "a/b/c"
+	if !strings.HasSuffix(importPath, expectedSuffix) {
+		t.Errorf("expected import path to end with %q, got %q", expectedSuffix, importPath)
+	}
+
+	expectedFull := moduleName + "/a/b/c"
+	if importPath != expectedFull {
+		t.Errorf("expected full import path %q, got %q", expectedFull, importPath)
+	}
+}

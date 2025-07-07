@@ -1,8 +1,12 @@
 package util
 
 import (
+	"errors"
 	"go/format"
 	"os"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/rah-0/nabu"
 )
@@ -33,4 +37,43 @@ func ReadFileAsString(path string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func GetGoModuleImportPath(outputPath string) (string, error) {
+	curr := filepath.Clean(outputPath)
+
+	for {
+		goModPath := filepath.Join(curr, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			// Read go.mod and extract module path
+			data, err := os.ReadFile(goModPath)
+			if err != nil {
+				return "", nabu.FromError(err).WithArgs(curr).Log()
+			}
+			var modulePath string
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "module ") {
+					modulePath = strings.TrimSpace(strings.TrimPrefix(line, "module "))
+					break
+				}
+			}
+			if modulePath == "" {
+				return "", nabu.FromError(errors.New("go.mod found but no module line")).Log()
+			}
+			relPath, err := filepath.Rel(curr, outputPath)
+			if err != nil {
+				return "", nabu.FromError(err).WithArgs(outputPath).Log()
+			}
+			importPath := path.Join(modulePath, filepath.ToSlash(relPath))
+			return importPath, nil
+		}
+
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			break // reached filesystem root
+		}
+		curr = parent
+	}
+
+	return "", nabu.FromError(errors.New("go.mod not found in any parent")).WithArgs(outputPath).Log()
 }

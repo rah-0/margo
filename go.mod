@@ -1,6 +1,6 @@
 module github.com/rah-0/margo
 
-go 1.24.1
+go 1.24.4
 
 // To update packages: go get -u ./...
 
