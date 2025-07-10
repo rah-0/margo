@@ -113,32 +113,42 @@ func GetGeneralFunctions(tfs []conf.TableField) string {
 	t += "	return placeholders\n"
 	t += "}\n\n"
 
-	t += "func GetFieldPlaceholdersWithName(fieldList []string) []string {\n"
-	t += "	placeholders := make([]string, 0, len(fieldList))\n\n"
-	t += "	for _, field := range fieldList {\n"
-	t += "		switch field {\n"
+	t += "func GetBacktickedField(field string) string {\n"
+	t += "	switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "		case Field" + tfn + ":\n"
-		t += "			placeholders = append(placeholders, \"`\" + Field" + tfn + " + \"` = ?\")\n"
+		t += "	case Field" + tfn + ":\n"
+		t += "		return FQTN + \".`\" + Field" + tfn + " + \"`\"\n"
 	}
-	t += "		}\n"
-	t += "	}\n\n"
-	t += "	return placeholders\n"
+	t += "	}\n"
+	t += "	return \"\"\n"
 	t += "}\n\n"
 
 	t += "func GetBacktickedFields(fieldList []string) []string {\n"
-	t += "	fields := make([]string, 0, len(fieldList))\n\n"
+	t += "	fields := make([]string, 0, len(fieldList))\n"
 	t += "	for _, field := range fieldList {\n"
-	t += "		switch field {\n"
+	t += "		fields = append(fields, GetBacktickedField(field))\n"
+	t += "	}\n"
+	t += "	return fields\n"
+	t += "}\n\n"
+
+	t += "func GetFieldPlaceholder(field string) string {\n"
+	t += "	switch field {\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
-		t += "		case Field" + tfn + ":\n"
-		t += "			fields = append(fields, \"`\" + Field" + tfn + " + \"`\")\n"
+		t += "	case Field" + tfn + ":\n"
+		t += "		return FQTN + \".`\" + Field" + tfn + " + \"` = ?\"\n"
 	}
-	t += "		}\n"
-	t += "	}\n\n"
-	t += "	return fields\n"
+	t += "	}\n"
+	t += "	return \"\"\n"
+	t += "}\n\n"
+
+	t += "func GetFieldPlaceholdersWithName(fieldList []string) []string {\n"
+	t += "	placeholders := make([]string, 0, len(fieldList))\n"
+	t += "	for _, field := range fieldList {\n"
+	t += "		placeholders = append(placeholders, GetFieldPlaceholder(field))\n"
+	t += "	}\n"
+	t += "	return placeholders\n"
 	t += "}\n\n"
 
 	t += "func getPreparedStmt(query string) (*sql.Stmt, error) {\n"
