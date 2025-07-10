@@ -74,7 +74,7 @@ func GetVars(tfs []conf.TableField) string {
 func GetStruct(tfs []conf.TableField) string {
 	t := "type Entity struct {\n"
 	for _, tf := range tfs {
-		t += db.NormalizeString(tf.Name) + " string\n"
+		t += db.NormalizeString(tf.Name) + " string `json:\",omitempty,omitzero\"`\n"
 	}
 	t += "}\n\n"
 	return t
