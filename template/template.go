@@ -161,19 +161,27 @@ func GetGeneralFunctions(tfs []conf.TableField) string {
 	t += "	return stmt, nil\n"
 	t += "}\n\n"
 
-	t += "func scanRow(rows *sql.Rows) (*Entity, error) {\n"
+	t += "func scanRow(fields []string, rows *sql.Rows) (*Entity, error) {\n"
 	t += "	x := &Entity{}\n"
+	t += "	var (\n"
 	for _, tf := range tfs {
-		t += "	var ptr" + db.NormalizeString(tf.Name) + " *string\n"
+		t += "		ptr" + db.NormalizeString(tf.Name) + " *string\n"
 	}
-	t += "	err := rows.Scan(\n"
+	t += "		scanTargets []any\n"
+	t += "	)\n\n"
+	t += "	for _, field := range fields {\n"
+	t += "		switch field {\n"
 	for _, tf := range tfs {
-		t += "		&ptr" + db.NormalizeString(tf.Name) + ",\n"
+		tfn := db.NormalizeString(tf.Name)
+		t += "		case Field" + tfn + ":\n"
+		t += "			scanTargets = append(scanTargets, &ptr" + tfn + ")\n"
 	}
-	t += "	)\n"
+	t += "		}\n"
+	t += "	}\n\n"
+	t += "	err := rows.Scan(scanTargets...)\n"
 	t += "	if err != nil {\n"
 	t += "		return nil, err\n"
-	t += "	}\n"
+	t += "	}\n\n"
 	for _, tf := range tfs {
 		tfn := db.NormalizeString(tf.Name)
 		t += "	if ptr" + tfn + " != nil {\n"
@@ -185,11 +193,11 @@ func GetGeneralFunctions(tfs []conf.TableField) string {
 	t += "	return x, nil\n"
 	t += "}\n\n"
 
-	t += "func readRows(rows *sql.Rows) ([]*Entity, error) {\n"
+	t += "func readRows(fields []string, rows *sql.Rows) ([]*Entity, error) {\n"
 	t += "	defer rows.Close()\n"
 	t += "	var results []*Entity\n"
 	t += "	for rows.Next() {\n"
-	t += "		x, err := scanRow(rows)\n"
+	t += "		x, err := scanRow(fields, rows)\n"
 	t += "		if err != nil {\n"
 	t += "			return results, err\n"
 	t += "		}\n"
@@ -327,7 +335,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func DBSelectAllContext(ctx context.Context) ([]*Entity, error) {\n"
@@ -341,7 +349,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func DBSelectAllWithFields(fields []string) ([]*Entity, error) {\n"
@@ -355,7 +363,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func DBSelectAllWithFieldsContext(ctx context.Context, fields []string) ([]*Entity, error) {\n"
@@ -369,7 +377,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func DBSubquerySelectAll(subquery string, args ...any) ([]*Entity, error) {\n"
@@ -383,7 +391,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func DBSubquerySelectAllContext(ctx context.Context, subquery string, args ...any) ([]*Entity, error) {\n"
@@ -397,7 +405,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSelectAllWhereAll(fieldsToMatch []string) ([]*Entity, error) {\n"
@@ -412,7 +420,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSelectAllWhereAllContext(ctx context.Context, fieldsToMatch []string) ([]*Entity, error) {\n"
@@ -427,7 +435,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSelectAllWhereAny(fieldsToMatch []string) ([]*Entity, error) {\n"
@@ -442,7 +450,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSelectAllWhereAnyContext(ctx context.Context, fieldsToMatch []string) ([]*Entity, error) {\n"
@@ -457,7 +465,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBExists(fields []string) (bool, error) {\n"
@@ -472,7 +480,7 @@ func GetDBFunctions() string {
 	t += "		return false, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	results, err := readRows(rows)\n"
+	t += "	results, err := readRows(Fields, rows)\n"
 	t += "	if err != nil {\n"
 	t += "		return false, err\n"
 	t += "	}\n"
@@ -495,7 +503,7 @@ func GetDBFunctions() string {
 	t += "		return false, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	results, err := readRows(rows)\n"
+	t += "	results, err := readRows(Fields, rows)\n"
 	t += "	if err != nil {\n"
 	t += "		return false, err\n"
 	t += "	}\n"
@@ -601,7 +609,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSubquerySelectAllWhereAllContext(ctx context.Context, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
@@ -617,7 +625,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSubquerySelectAllWhereAny(fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
@@ -633,7 +641,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSubquerySelectAllWhereAnyContext(ctx context.Context, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
@@ -649,7 +657,7 @@ func GetDBFunctions() string {
 	t += "		return nil, err\n"
 	t += "	}\n"
 	t += "	defer rows.Close()\n"
-	t += "	return readRows(rows)\n"
+	t += "	return readRows(Fields, rows)\n"
 	t += "}\n\n"
 
 	return t
