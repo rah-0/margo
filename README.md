@@ -97,7 +97,7 @@ MarGO can turn tagged SQL into type-safe Go functions:
 - Placeholders are still `?` and bound by call order.
 
 ### Returns
-- **Syntax:** `-- Returns: total_size_bytes reached_file_count_limit exceeded_size_limit`
+- **Syntax:** `-- Returns: field_a field_b field_c`
 - **Required** for `many` or `one` modes
 - Order defines the struct field order
 - Field names are normalized with `db.NormalizeString`
