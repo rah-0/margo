@@ -20,4 +20,10 @@ type NamedQuery struct {
 	Name         string
 	Query        string
 	QueryEncoded string
+
+	Params  []string   // from -- Params:
+	Returns []string   // from -- Returns:
+	Mode    ResultMode // from -- ResultMode: one|many|exec
+	UseTx   bool       // from -- Tx
+	UseCtx  bool       // from -- Context
 }

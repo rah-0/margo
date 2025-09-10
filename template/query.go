@@ -61,6 +61,7 @@ func GetImportsQueries(pathModuleOutput string, tns []string) string {
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
 	imports += `"encoding/base64"` + "\n"
+	imports += `"errors"` + "\n"
 	imports += `"sync"` + "\n\n"
 	for _, tn := range tns {
 		pathModuleTable := filepath.Join(pathModuleOutput, db.NormalizeString(tn))
@@ -220,6 +221,16 @@ func GetGeneralFunctionsQueries(tns []string) string {
 	t += "	return stmt, nil\n"
 	t += "}\n\n"
 
+	t += "func bindStmtCtxTx(base *sql.Stmt, ctx context.Context, tx *sql.Tx) (*sql.Stmt, bool) {\n"
+	t += "	if tx == nil {\n"
+	t += "		return base, false\n"
+	t += "	}\n"
+	t += "	if ctx != nil {\n"
+	t += "		return tx.StmtContext(ctx, base), true\n"
+	t += "	}\n"
+	t += "	return tx.Stmt(base), true\n"
+	t += "}\n\n"
+
 	return t
 }
 
@@ -234,8 +245,13 @@ func CheckNoSelectStar(queries []string) error {
 }
 
 func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
-	genResultStruct := func(resultType string, fields []string) string {
-		s := "type " + resultType + " struct {\n"
+	t := ""
+
+	genResultStruct := func(typeName string, fields []string) string {
+		if len(fields) == 0 {
+			return ""
+		}
+		s := "type " + typeName + " struct {\n"
 		for _, f := range fields {
 			s += db.NormalizeString(f) + " string\n"
 		}
@@ -243,99 +259,224 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		return s
 	}
 
-	genQueryFunction := func(funcName, resultType, queryName string, hasParams, withContext bool, fields []string) string {
-		s := "func " + funcName + "("
-		if withContext {
-			s += "ctx context.Context"
+	genCore := func(nq conf.NamedQuery, mode string, fields []string, hasParams bool) string {
+		coreName := "query" + nq.Name
+		resType := "Query" + nq.Name + "Result"
+
+		// signatures
+		var ret string
+		switch mode {
+		case "exec":
+			ret = "(res sql.Result, err error)"
+		case "one":
+			ret = "(_ *" + resType + ", err error)"
+		default: // many
+			ret = "(_ []" + resType + ", err error)"
+		}
+
+		// guard: enforce Returns for query modes
+		if (mode == "many" || mode == "one") && len(fields) == 0 {
+			s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
 			if hasParams {
 				s += ", args ...any"
 			}
-		} else if hasParams {
-			s += "args ...any"
-		}
-		if len(fields) > 0 {
-			s += ") ([]" + resultType + ", error) {\n"
-		} else {
-			s += ") (*sql.Rows, error) {\n"
-		}
-
-		s += "q := queries[\"" + queryName + "\"]\n"
-		s += "stmt, err := getPreparedStmt(q.Query)\n"
-		s += "if err != nil {\nreturn nil, err\n}\n"
-
-		call := "stmt.Query"
-		if withContext {
-			call += "Context"
-		}
-		s += "rows, err := " + call
-		if withContext || hasParams {
-			s += "("
-			if withContext && hasParams {
-				s += "ctx, args..."
-			} else if withContext {
-				s += "ctx"
-			} else {
-				s += "args..."
-			}
-			s += ")"
-		} else {
-			s += "()"
-		}
-		s += "\n"
-
-		s += "if err != nil {\nreturn nil, err\n}\n"
-
-		if len(fields) == 0 {
-			s += "return rows, nil\n"
+			s += ") " + ret + " {\n"
+			s += `err = fmt.Errorf("named query ` + nq.Name + ` requires -- Returns: for ResultMode=` + mode + `")` + "\n"
+			s += "return\n"
 			s += "}\n\n"
 			return s
 		}
 
-		s += "defer rows.Close()\n"
-		s += "var results []" + resultType + "\n"
-		s += "for rows.Next() {\n"
-		for _, f := range fields {
-			s += "var ptr" + db.NormalizeString(f) + " *string\n"
+		s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
+		if hasParams {
+			s += ", args ...any"
 		}
-		s += "err := rows.Scan("
-		for i, f := range fields {
-			if i > 0 {
-				s += ", "
+		s += ") " + ret + " {\n"
+		s += "q := queries[\"" + nq.Name + "\"]\n"
+		s += "base, err := getPreparedStmt(q.Query)\n"
+		s += "if err != nil { return }\n\n"
+		s += "var c context.Context\n"
+		s += "if ctx != nil { c = *ctx }\n\n"
+		s += "stmt, needClose := bindStmtCtxTx(base, c, tx)\n"
+		s += "if needClose { defer func(){ if cerr := stmt.Close(); err == nil && cerr != nil { err = cerr } }() }\n\n"
+
+		switch conf.ResultMode(mode) {
+		case conf.ModeExec:
+			if hasParams {
+				s += "if ctx != nil { res, err = stmt.ExecContext(*ctx, args...) } else { res, err = stmt.Exec(args...) }\n"
+			} else {
+				s += "if ctx != nil { res, err = stmt.ExecContext(*ctx) } else { res, err = stmt.Exec() }\n"
 			}
-			s += "&ptr" + db.NormalizeString(f)
-		}
-		s += ")\n"
-		s += "if err != nil {\nreturn results, err\n}\n"
-		s += "x := " + resultType + "{}\n"
-		for _, f := range fields {
-			name := db.NormalizeString(f)
-			s += "if ptr" + name + " != nil {\n"
-			s += "x." + name + " = *ptr" + name + "\n"
-			s += "} else {\n"
-			s += "x." + name + " = \"\"\n"
+			s += "return\n"
+			s += "}\n\n"
+			return s
+
+		case conf.ModeOne:
+			// use QueryRow(…): no rows.Close needed
+			for _, f := range fields {
+				s += "var ptr" + db.NormalizeString(f) + " *string\n"
+			}
+			if hasParams {
+				s += "if ctx != nil { err = stmt.QueryRowContext(*ctx, args...).Scan("
+			} else {
+				s += "if ctx != nil { err = stmt.QueryRowContext(*ctx).Scan("
+			}
+			for i, f := range fields {
+				if i > 0 {
+					s += ", "
+				}
+				s += "&ptr" + db.NormalizeString(f)
+			}
+			s += ") } else { err = stmt.QueryRow("
+			if hasParams {
+				s += "args..."
+			}
+			s += ").Scan("
+			for i, f := range fields {
+				if i > 0 {
+					s += ", "
+				}
+				s += "&ptr" + db.NormalizeString(f)
+			}
+			s += ") }\n"
+			s += "if errors.Is(err, sql.ErrNoRows) { return nil, nil }\n"
+			s += "if err != nil { return }\n\n"
+			s += "x := &" + resType + "{}\n"
+			for _, f := range fields {
+				fn := db.NormalizeString(f)
+				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
+			}
+			s += "return x, nil\n"
+			s += "}\n\n"
+			return s
+
+		default: // many
+			// materialize all rows
+			s += "var rows *sql.Rows\n"
+			if hasParams {
+				s += "if ctx != nil { rows, err = stmt.QueryContext(*ctx, args...) } else { rows, err = stmt.Query(args...) }\n"
+			} else {
+				s += "if ctx != nil { rows, err = stmt.QueryContext(*ctx) } else { rows, err = stmt.Query() }\n"
+			}
+			s += "if err != nil { return }\n"
+			s += "defer rows.Close()\n\n"
+			s += "var out []" + resType + "\n"
+			s += "for rows.Next() {\n"
+			for _, f := range fields {
+				s += "var ptr" + db.NormalizeString(f) + " *string\n"
+			}
+			s += "if err = rows.Scan("
+			for i, f := range fields {
+				if i > 0 {
+					s += ", "
+				}
+				s += "&ptr" + db.NormalizeString(f)
+			}
+			s += "); err != nil { return }\n"
+			s += "x := " + resType + "{}\n"
+			for _, f := range fields {
+				fn := db.NormalizeString(f)
+				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
+			}
+			s += "out = append(out, x)\n"
 			s += "}\n"
+			s += "if err = rows.Err(); err != nil { return }\n"
+			s += "return out, nil\n"
+			s += "}\n\n"
+			return s
 		}
-		s += "results = append(results, x)\n"
-		s += "}\n"
-		s += "return results, nil\n"
-		s += "}\n\n"
+	}
+
+	genWrappers := func(nq conf.NamedQuery, mode string, fields []string, hasParams bool) string {
+		core := "query" + nq.Name
+		resType := "Query" + nq.Name + "Result"
+
+		// params builder for wrappers
+		params := func(withCtx, withTx bool) string {
+			var ps []string
+			if withCtx {
+				ps = append(ps, "ctx context.Context")
+			}
+			if withTx {
+				ps = append(ps, "tx *sql.Tx")
+			}
+			if hasParams {
+				ps = append(ps, "args ...any")
+			}
+			return "(" + strings.Join(ps, ", ") + ")"
+		}
+		// call args to core
+		coreArgs := func(withCtx, withTx bool) string {
+			a := ""
+			if withCtx {
+				a += "&ctx"
+			} else {
+				a += "nil"
+			}
+			a += ", "
+			if withTx {
+				a += "tx"
+			} else {
+				a += "nil"
+			}
+			if hasParams {
+				a += ", args..."
+			}
+			return a
+		}
+
+		var retMany, retOne, retExec string
+		retMany = "([]" + resType + ", error)"
+		retOne = "(*" + resType + ", error)"
+		retExec = "(sql.Result, error)"
+
+		namePrefix := ""
+		switch mode {
+		case "exec":
+			namePrefix = "Exec" + nq.Name
+		case "one":
+			namePrefix = "Query" + nq.Name
+		default:
+			namePrefix = "Query" + nq.Name
+		}
+
+		s := ""
+
+		switch mode {
+		case "exec":
+			s += "func " + namePrefix + params(false, false) + " " + retExec + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
+			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retExec + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
+			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retExec + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
+			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retExec + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
+		case "one":
+			s += "func " + namePrefix + params(false, false) + " " + retOne + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
+			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retOne + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
+			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retOne + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
+			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retOne + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
+		default:
+			s += "func " + namePrefix + params(false, false) + " " + retMany + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
+			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retMany + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
+			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retMany + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
+			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retMany + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
+		}
 		return s
 	}
 
-	t := ""
-
 	for _, nq := range nqs {
-		funcName := "Query" + nq.Name
-		resultType := funcName + "Result"
-		hasParams := strings.Contains(nq.Query, "?")
-		fields := ExtractSelectFields(nq.Query)
-
-		if len(fields) > 0 {
-			t += genResultStruct(resultType, fields)
+		mode := strings.ToLower(string(nq.Mode))
+		if mode == "" {
+			mode = "many"
 		}
+		fields := nq.Returns
+		hasParams := strings.Contains(nq.Query, "?")
 
-		t += genQueryFunction(funcName, resultType, nq.Name, hasParams, false, fields)
-		t += genQueryFunction(funcName+"Context", resultType, nq.Name, hasParams, true, fields)
+		// struct for query modes
+		if (mode == "many" || mode == "one") && len(fields) > 0 {
+			t += genResultStruct("Query"+nq.Name+"Result", fields)
+		}
+		// core + 4 wrappers
+		t += genCore(nq, mode, fields, hasParams)
+		t += genWrappers(nq, mode, fields, hasParams)
 	}
 
 	return t
@@ -352,35 +493,56 @@ func GetStructsQueries() string {
 }
 
 func ExtractNamedQueries(rawQueries []string) []conf.NamedQuery {
-	var out []conf.NamedQuery
+	out := make([]conf.NamedQuery, 0, len(rawQueries))
 
 	for _, raw := range rawQueries {
-		var name string
+		var (
+			name            string
+			params, returns []string
+			mode            = "many"
+			useTx, useCtx   bool
+			cleanLines      []string
+		)
 
-		lines := strings.Split(raw, "\n")
-		var cleanLines []string
-
-		for _, line := range lines {
+		for _, line := range strings.Split(raw, "\n") {
 			trim := strings.TrimSpace(line)
 
-			// Extract name tag if found
-			if strings.HasPrefix(trim, "-- Name:") {
-				name = strings.TrimSpace(strings.TrimPrefix(trim, "-- Name:"))
+			if v, ok := util.TrimPrefixCase(trim, "-- Name:"); ok {
+				name = v
 				continue
 			}
-
-			// Ignore line comments
+			if v, ok := util.TrimPrefixCase(trim, "-- Params:"); ok {
+				if v != "" {
+					params = strings.Fields(v)
+				}
+				continue
+			}
+			if v, ok := util.TrimPrefixCase(trim, "-- Returns:"); ok {
+				if v != "" {
+					returns = strings.Fields(v)
+				}
+				continue
+			}
+			if v, ok := util.TrimPrefixCase(trim, "-- ResultMode:"); ok {
+				mode = util.ParseResultMode(v)
+				continue
+			}
+			if strings.HasPrefix(trim, "-- Transaction") {
+				useTx = true
+				continue
+			}
+			if strings.HasPrefix(trim, "-- Context") {
+				useCtx = true
+				continue
+			}
+			// ignore other comment lines
 			if strings.HasPrefix(trim, "--") || strings.HasPrefix(trim, "#") {
 				continue
 			}
-
-			// Keep non-comment lines for final query
 			cleanLines = append(cleanLines, line)
 		}
 
-		clean := StripSQLComments(strings.Join(cleanLines, "\n"))
-		clean = strings.TrimSpace(clean)
-
+		clean := strings.TrimSpace(StripSQLComments(strings.Join(cleanLines, "\n")))
 		if clean == "" {
 			continue
 		}
@@ -389,43 +551,13 @@ func ExtractNamedQueries(rawQueries []string) []conf.NamedQuery {
 			Name:         name,
 			Query:        clean,
 			QueryEncoded: base64.StdEncoding.EncodeToString([]byte(clean)),
+			Params:       params,
+			Returns:      returns,
+			Mode:         conf.ResultMode(mode), // "many" | "one" | "exec"
+			UseTx:        useTx,
+			UseCtx:       useCtx,
 		})
 	}
 
-	return out
-}
-
-func ExtractSelectFields(sql string) []string {
-	sql = StripSQLComments(sql)
-	original := strings.Join(strings.Fields(sql), " ") // normalize for parsing
-	upper := strings.ToUpper(original)
-
-	selectRe := regexp.MustCompile(`(?i)\bSELECT\b`)
-	fromRe := regexp.MustCompile(`(?i)\bFROM\b`)
-
-	selectLoc := selectRe.FindStringIndex(upper)
-	fromLoc := fromRe.FindStringIndex(upper)
-
-	if selectLoc == nil || fromLoc == nil || fromLoc[0] <= selectLoc[1] {
-		return []string{}
-	}
-
-	// Use positions from normalized string to slice original
-	fieldRegion := original[selectLoc[1]:fromLoc[0]]
-	return ExtractFieldList(fieldRegion)
-}
-
-func ExtractFieldList(fragment string) []string {
-	parts := strings.Split(fragment, ",")
-	var out []string
-	for _, raw := range parts {
-		field := strings.TrimSpace(raw)
-		if i := strings.Index(strings.ToLower(field), " as "); i != -1 {
-			out = append(out, strings.Trim(field[i+4:], "` "))
-		} else {
-			segments := strings.Split(field, ".")
-			out = append(out, strings.Trim(segments[len(segments)-1], "` "))
-		}
-	}
 	return out
 }

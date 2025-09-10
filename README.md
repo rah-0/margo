@@ -75,7 +75,7 @@ margo -dbUser="your_db_user" \
 
 ## Custom SQL Queries
 
-MarGO allows you to define custom SQL queries that will be transformed into type-safe Go functions:
+MarGO can turn tagged SQL into type-safe Go functions:
 
 ### Requirements
 
@@ -83,6 +83,48 @@ MarGO allows you to define custom SQL queries that will be transformed into type
 - Each custom query must be prefixed with `-- Name: FunctionName`, [example](https://github.com/rah-0/margo/blob/master/doc/sql/queries.sql#L1). The generated function will look like [this](https://github.com/rah-0/margo-test/blob/master/dbs/Template/queries.go#L78)
 - Queries must end with a semicolon (`;`) and be separated by at least one newline
 - No `SELECT *` queries are allowed, you must explicitly specify columns
+
+## Supported Tags (SQL Generator)
+
+### Name
+- **Syntax:** `-- Name: SampleTest`
+- **Required**
+- Becomes the base name for generated functions/types.
+
+### Params
+- **Syntax:** `-- Params: uuid_user id ...`
+- **Optional** (documentation only, for now)
+- Placeholders are still `?` and bound by call order.
+
+### Returns
+- **Syntax:** `-- Returns: total_size_bytes reached_file_count_limit exceeded_size_limit`
+- **Required** for `many` or `one` modes
+- Order defines the struct field order
+- Field names are normalized with `db.NormalizeString`
+- All fields are string (`NULL → ""`).
+
+### ResultMode
+- **Syntax:** `-- ResultMode: many | one | exec`
+- **Optional**, defaults to `many`
+
+| Mode   | Returns                               |
+|--------|---------------------------------------|
+| many   | `[]Query<Name>Result`                 |
+| one    | `*Query<Name>Result` (nil if no rows) |
+| exec   | `sql.Result`                          |
+
+### Transaction
+- **Syntax:** `-- Transaction`
+- **Optional**
+- Currently informational (generator emits `Tx` variants regardless).
+
+### Context
+- **Optional**
+- Currently informational (generator emits `Ctx` variants regardless).
+
+### Notes
+- Comments starting with `-- ...` or `# ...` are ignored.
+- Block comments `/* ... */` are stripped safely (handles quotes).
 
 ### Using Generated Query Functions
 
