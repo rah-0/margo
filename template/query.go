@@ -48,7 +48,7 @@ func CreateGoFileQueries(tns []string) error {
 func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
 	t := "package " + db.NormalizeString(conf.Args.DBName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImportsQueries(pathModuleOutput, tns, nqs)
+	t += GetImportsQueries(pathModuleOutput, tns)
 	t += GetVarsQueries(nqs)
 	t += GetStructsQueries()
 	t += GetGeneralFunctionsQueries(tns)
@@ -56,22 +56,12 @@ func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.Nam
 	return t
 }
 
-func GetImportsQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
-	needErrors := false
-	for _, nq := range nqs {
-		if nq.Mode == conf.ModeOne {
-			needErrors = true
-			break
-		}
-	}
-
+func GetImportsQueries(pathModuleOutput string, tns []string) string {
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
 	imports += `"encoding/base64"` + "\n"
-	if needErrors {
-		imports += `"errors"` + "\n"
-	}
+	imports += `"errors"` + "\n"
 	imports += `"sync"` + "\n\n"
 	for _, tn := range tns {
 		pathModuleTable := filepath.Join(pathModuleOutput, db.NormalizeString(tn))
@@ -209,6 +199,31 @@ func GetGeneralFunctionsQueries(tns []string) string {
 		t += db.NormalizeString(tn) + ".SetDB(x)\n"
 	}
 	t += "\nreturn nil\n"
+	t += "}\n\n"
+
+	t += "func NewTx() (*sql.Tx, error) {\n"
+	t += "if db == nil {\n"
+	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += "}\n"
+	t += "return db.Begin()\n"
+	t += "}\n\n"
+	t += "func NewCtxTx(ctx context.Context) (*sql.Tx, error) {\n"
+	t += "if db == nil {\n"
+	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += "}\n"
+	t += "return db.BeginTx(ctx, nil)\n"
+	t += "}\n\n"
+	t += "func NewTxOpts(opts *sql.TxOptions) (*sql.Tx, error) {\n"
+	t += "if db == nil {\n"
+	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += "}\n"
+	t += "return db.BeginTx(context.Background(), opts)\n"
+	t += "}\n\n"
+	t += "func NewCtxTxOpts(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {\n"
+	t += "if db == nil {\n"
+	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += "}\n"
+	t += "return db.BeginTx(ctx, opts)\n"
 	t += "}\n\n"
 
 	t += "func getPreparedStmt(query string) (*sql.Stmt, error) {\n"
