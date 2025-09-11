@@ -48,7 +48,7 @@ func CreateGoFileQueries(tns []string) error {
 func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
 	t := "package " + db.NormalizeString(conf.Args.DBName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImportsQueries(pathModuleOutput, tns)
+	t += GetImportsQueries(pathModuleOutput, tns, nqs)
 	t += GetVarsQueries(nqs)
 	t += GetStructsQueries()
 	t += GetGeneralFunctionsQueries(tns)
@@ -56,12 +56,22 @@ func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.Nam
 	return t
 }
 
-func GetImportsQueries(pathModuleOutput string, tns []string) string {
+func GetImportsQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
+	needErrors := false
+	for _, nq := range nqs {
+		if nq.Mode == conf.ModeOne {
+			needErrors = true
+			break
+		}
+	}
+
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
 	imports += `"encoding/base64"` + "\n"
-	imports += `"errors"` + "\n"
+	if needErrors {
+		imports += `"errors"` + "\n"
+	}
 	imports += `"sync"` + "\n\n"
 	for _, tn := range tns {
 		pathModuleTable := filepath.Join(pathModuleOutput, db.NormalizeString(tn))
