@@ -113,14 +113,34 @@ MarGO can turn tagged SQL into type-safe Go functions:
 | one    | `*Query<Name>Result` (nil if no rows) |
 | exec   | `sql.Result`                          |
 
-### Transaction
-- **Syntax:** `-- Transaction`
-- **Optional**
-- Currently informational (generator emits `Tx` variants regardless).
+### MapAs
+- **Syntax:** `-- MapAs: table_name`
+- **Optional but highly significant**
+- Defines the table entity this query belongs to
+- When set, the generated function is placed inside that table’s `entity.go` file and returns the **base entity type** (e.g., `[]*Entity` or `*Entity`)
+- When omitted, the query is treated as a **standalone custom query**, generating its own result struct (`Query<Name>Result`) and appearing in the global `queries.go`
+- In short:  
+  **With MapAs → operates on an existing entity.**  
+  **Without MapAs → creates a new custom result type.**
 
-### Context
-- **Optional**
-- Currently informational (generator emits `Ctx` variants regardless).
+### Field Mapping Rules (with MapAs)
+
+- Use the table’s **exact column names** in both `SELECT` and `-- Returns:` (e.g., `uuid`, `last_update`, `test_field`).
+- Backticks not required; aliases/expressions not supported with MapAs.
+- Order doesn’t matter; names must exist in the table.
+- The generator normalizes to Go fields via `db.NormalizeString`  
+  (`uuid`→`Uuid`, `last_update`→`LastUpdate`, `test_field`→`TestField`).
+
+**Example**
+```sql
+-- Name: GetRecentCats
+-- Returns: uuid last_update
+-- ResultMode: many
+-- MapAs: alpha
+SELECT uuid, last_update
+FROM alpha
+WHERE animal = 'cat' AND last_update > '2024-01-01 00:00:00.000000';
+```
 
 ### Notes
 - Comments starting with `-- ...` or `# ...` are ignored.

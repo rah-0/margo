@@ -39,20 +39,29 @@ func main() {
 		return
 	}
 
+	nqs, err := template.CreateGoFileQueries(tableNames)
+	if err != nil {
+		nabu.FromError(err).WithLevelFatal().Log()
+		return
+	}
+
 	for _, tn := range tableNames {
 		tfs, err := db.GetDbTableFields(conn, tn)
 		if err != nil {
 			nabu.FromError(err).WithLevelFatal().Log()
 			return
 		}
-		if err := template.CreateGoFileEntity(tn, tfs); err != nil {
+		
+		tnqs := []conf.NamedQuery{}
+		for _, nq := range nqs {
+			if nq.MapAs == tn {
+				tnqs = append(tnqs, nq)
+			}
+		}
+
+		if err := template.CreateGoFileEntity(tn, tfs, tnqs); err != nil {
 			nabu.FromError(err).WithLevelFatal().Log()
 			return
 		}
-	}
-
-	if err := template.CreateGoFileQueries(tableNames); err != nil {
-		nabu.FromError(err).WithLevelFatal().Log()
-		return
 	}
 }

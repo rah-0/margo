@@ -3,6 +3,8 @@ package util
 import (
 	"strings"
 	"unicode"
+
+	"github.com/rah-0/margo/conf"
 )
 
 // Capitalize returns the string with only the first rune uppercased, rest lowercased.
@@ -36,9 +38,9 @@ func ParseResultMode(v string) string {
 	}
 	v = strings.ToLower(strings.TrimSpace(v))
 	switch v {
-	case "one", "exec", "many":
+	case conf.ResultModeOne, conf.ResultModeExec, conf.ResultModeMany:
 		return v
 	default:
-		return "many"
+		return conf.ResultModeMany
 	}
 }

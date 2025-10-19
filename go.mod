@@ -7,7 +7,7 @@ go 1.24.4
 require (
 	github.com/fatih/camelcase v1.0.0
 	github.com/go-sql-driver/mysql v1.9.3
-	github.com/rah-0/nabu v0.0.5
+	github.com/rah-0/nabu v0.0.6
 	github.com/rah-0/testmark v1.0.3
 )
 

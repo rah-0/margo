@@ -3,6 +3,7 @@ package template
 import (
 	"testing"
 
+	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
 )
 
@@ -12,7 +13,7 @@ func TestCreateGoFileEntity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := CreateGoFileEntity(tn, tfs); err != nil {
+		if err := CreateGoFileEntity(tn, tfs, []conf.NamedQuery{}); err != nil {
 			t.Fatal(err)
 		}
 	}

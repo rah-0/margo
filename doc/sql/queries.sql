@@ -1,4 +1,11 @@
 -- Name: GetAllAnimals
+-- Returns: Animal
+-- ResultMode: many
+-- MapAs: alpha
+SELECT `Animal`
+FROM `alpha`;
+
+-- Name: GetAllAnimals
 -- Returns: Animal BigNumber
 -- ResultMode: many
 SELECT `Animal`, `BigNumber`
@@ -63,8 +70,6 @@ DELETE FROM `alpha` WHERE `LastUpdate` < '2023-01-01 00:00:00.000000';
 -- Params: user_id
 -- Returns: total_storage_used reached_file_limit exceeded_storage_limit
 -- ResultMode: one
--- Transaction
--- Context
 WITH selected_user_plan AS (
     SELECT up.user_id, up.plan_id
     FROM user_plan up

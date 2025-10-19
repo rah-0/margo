@@ -6,7 +6,7 @@ import (
 )
 
 func TestCreateGoFileQueries(t *testing.T) {
-	if err := CreateGoFileQueries(tableNames); err != nil {
+	if _, err := CreateGoFileQueries(tableNames); err != nil {
 		t.Fatal(err)
 	}
 }

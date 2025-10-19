@@ -16,33 +16,42 @@ import (
 
 var selectStarRegex = regexp.MustCompile(`(?i)select\s*\*`)
 
-func CreateGoFileQueries(tns []string) error {
+func CreateGoFileQueries(tns []string) ([]conf.NamedQuery, error) {
 	if conf.Args.QueriesPath == "" {
-		return nil
+		return []conf.NamedQuery{}, nil
 	}
 
 	pathModuleOutput, err := util.GetGoModuleImportPath(conf.Args.OutputPath)
 	if err != nil {
-		return nabu.FromError(err).WithArgs(conf.Args.OutputPath).Log()
+		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.OutputPath).Log()
 	}
 	pathModuleOutput = filepath.Join(pathModuleOutput, db.NormalizeString(conf.Args.DBName))
 
 	fq, err := util.ReadFileAsString(conf.Args.QueriesPath)
 	if err != nil {
-		return nabu.FromError(err).WithArgs(conf.Args.QueriesPath).Log()
+		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.QueriesPath).Log()
 	}
 
 	qs := SplitSQLQueries(fq)
 	if err = CheckNoSelectStar(qs); err != nil {
-		return nabu.FromError(err).WithArgs(fq).Log()
+		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(fq).Log()
 	}
 
 	nqs := ExtractNamedQueries(qs)
+	nqsGeneral := []conf.NamedQuery{}
+	nqsTableSpecific := []conf.NamedQuery{}
+	for _, nq := range nqs {
+		if nq.MapAs == "" {
+			nqsGeneral = append(nqsGeneral, nq)
+		} else {
+			nqsTableSpecific = append(nqsTableSpecific, nq)
+		}
+	}
 
 	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), "queries.go")
-	c := GetFileContentQueries(pathModuleOutput, tns, nqs)
+	c := GetFileContentQueries(pathModuleOutput, tns, nqsGeneral)
 
-	return util.WriteGoFile(p, c)
+	return nqsTableSpecific, util.WriteGoFile(p, c)
 }
 
 func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
@@ -196,7 +205,9 @@ func GetGeneralFunctionsQueries(tns []string) string {
 	t += "q.Query = string(b)\n"
 	t += "}\n\n"
 	for _, tn := range tns {
-		t += db.NormalizeString(tn) + ".SetDB(x)\n"
+		t += "if err := " + db.NormalizeString(tn) + ".SetDB(x); err != nil {\n"
+		t += "return err\n"
+		t += "}\n"
 	}
 	t += "\nreturn nil\n"
 	t += "}\n\n"
@@ -291,16 +302,16 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		// signatures
 		var ret string
 		switch mode {
-		case "exec":
+		case conf.ResultModeExec:
 			ret = "(res sql.Result, err error)"
-		case "one":
+		case conf.ResultModeOne:
 			ret = "(_ *" + resType + ", err error)"
 		default: // many
 			ret = "(_ []" + resType + ", err error)"
 		}
 
 		// guard: enforce Returns for query modes
-		if (mode == "many" || mode == "one") && len(fields) == 0 {
+		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) == 0 {
 			s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
 			if hasParams {
 				s += ", args ...any"
@@ -325,8 +336,8 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		s += "stmt, needClose := bindStmtCtxTx(base, c, tx)\n"
 		s += "if needClose { defer func(){ if cerr := stmt.Close(); err == nil && cerr != nil { err = cerr } }() }\n\n"
 
-		switch conf.ResultMode(mode) {
-		case conf.ModeExec:
+		switch mode {
+		case conf.ResultModeExec:
 			if hasParams {
 				s += "if ctx != nil { res, err = stmt.ExecContext(*ctx, args...) } else { res, err = stmt.Exec(args...) }\n"
 			} else {
@@ -336,7 +347,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 			s += "}\n\n"
 			return s
 
-		case conf.ModeOne:
+		case conf.ResultModeOne:
 			// use QueryRow(…): no rows.Close needed
 			for _, f := range fields {
 				s += "var ptr" + db.NormalizeString(f) + " *string\n"
@@ -457,28 +468,28 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 
 		namePrefix := ""
 		switch mode {
-		case "exec":
+		case conf.ResultModeExec:
 			namePrefix = "Exec" + nq.Name
-		case "one":
+		case conf.ResultModeOne:
 			namePrefix = "Query" + nq.Name
-		default:
+		default: // many
 			namePrefix = "Query" + nq.Name
 		}
 
 		s := ""
 
 		switch mode {
-		case "exec":
+		case conf.ResultModeExec:
 			s += "func " + namePrefix + params(false, false) + " " + retExec + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
 			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retExec + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
 			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retExec + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
 			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retExec + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
-		case "one":
+		case conf.ResultModeOne:
 			s += "func " + namePrefix + params(false, false) + " " + retOne + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
 			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retOne + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
 			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retOne + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
 			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retOne + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
-		default:
+		default: // Many
 			s += "func " + namePrefix + params(false, false) + " " + retMany + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
 			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retMany + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
 			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retMany + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
@@ -490,13 +501,13 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 	for _, nq := range nqs {
 		mode := strings.ToLower(string(nq.Mode))
 		if mode == "" {
-			mode = "many"
+			mode = conf.ResultModeMany
 		}
 		fields := nq.Returns
 		hasParams := strings.Contains(nq.Query, "?")
 
 		// struct for query modes
-		if (mode == "many" || mode == "one") && len(fields) > 0 {
+		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) > 0 {
 			t += genResultStruct("Query"+nq.Name+"Result", fields)
 		}
 		// core + 4 wrappers
@@ -524,9 +535,9 @@ func ExtractNamedQueries(rawQueries []string) []conf.NamedQuery {
 		var (
 			name            string
 			params, returns []string
-			mode            = "many"
-			useTx, useCtx   bool
+			mode            = conf.ResultModeMany
 			cleanLines      []string
+			mapAs           string
 		)
 
 		for _, line := range strings.Split(raw, "\n") {
@@ -548,16 +559,14 @@ func ExtractNamedQueries(rawQueries []string) []conf.NamedQuery {
 				}
 				continue
 			}
+			if v, ok := util.TrimPrefixCase(trim, "-- MapAs:"); ok {
+				if v != "" {
+					mapAs = v
+				}
+				continue
+			}
 			if v, ok := util.TrimPrefixCase(trim, "-- ResultMode:"); ok {
 				mode = util.ParseResultMode(v)
-				continue
-			}
-			if strings.HasPrefix(trim, "-- Transaction") {
-				useTx = true
-				continue
-			}
-			if strings.HasPrefix(trim, "-- Context") {
-				useCtx = true
 				continue
 			}
 			// ignore other comment lines
@@ -578,9 +587,8 @@ func ExtractNamedQueries(rawQueries []string) []conf.NamedQuery {
 			QueryEncoded: base64.StdEncoding.EncodeToString([]byte(clean)),
 			Params:       params,
 			Returns:      returns,
-			Mode:         conf.ResultMode(mode), // "many" | "one" | "exec"
-			UseTx:        useTx,
-			UseCtx:       useCtx,
+			Mode:         mode, // "many" | "one" | "exec"
+			MapAs:        mapAs,
 		})
 	}
 

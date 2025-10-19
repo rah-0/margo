@@ -4,28 +4,35 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rah-0/nabu"
+
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
 	"github.com/rah-0/margo/util"
 )
 
-func CreateGoFileEntity(rawTableName string, tfs []conf.TableField) error {
+func CreateGoFileEntity(rawTableName string, tfs []conf.TableField, nqs []conf.NamedQuery) error {
 	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), db.NormalizeString(rawTableName), "entity.go")
-	c := GetFileContentEntity(rawTableName, tfs)
+	c, err := GetFileContentEntity(rawTableName, tfs, nqs)
+	if err != nil {
+		return nabu.FromError(err).WithArgs(rawTableName).Log()
+	}
+
 	return util.WriteGoFile(p, c)
 }
 
-func GetFileContentEntity(rawTableName string, tfs []conf.TableField) string {
+func GetFileContentEntity(rawTableName string, tfs []conf.TableField, nqs []conf.NamedQuery) (string, error) {
 	t := "package " + db.NormalizeString(rawTableName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImports()
+	t += GetImports(nqs)
 	t += GetConsts(rawTableName, tfs)
-	t += GetVars(tfs)
+	t += GetVars(tfs, nqs)
 	t += GetStruct(tfs)
-	t += GetGeneralFunctions(tfs)
+	t += GetGeneralFunctions(tfs, nqs)
 	t += GetDBFunctions()
+	t += GetNamedQueryFunctions(nqs)
 
-	return t
+	return t, nil
 }
 
 func GetCommentWarning() string {
@@ -36,10 +43,13 @@ func GetCommentWarning() string {
 `
 }
 
-func GetImports() string {
+func GetImports(nqs []conf.NamedQuery) string {
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
+	if len(nqs) > 0 {
+		imports += `"encoding/base64"` + "\n"
+	}
 	imports += `"strings"` + "\n"
 	imports += `"sync"` + "\n"
 	imports += ")\n\n"
@@ -56,7 +66,7 @@ func GetConsts(rawTableName string, tfs []conf.TableField) string {
 	return t
 }
 
-func GetVars(tfs []conf.TableField) string {
+func GetVars(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	var fieldList []string
 	for _, tf := range tfs {
 		fieldList = append(fieldList, "Field"+db.NormalizeString(tf.Name))
@@ -67,7 +77,23 @@ func GetVars(tfs []conf.TableField) string {
 	t += "db *sql.DB\n"
 	t += "stmtMu sync.RWMutex\n"
 	t += "stmtCache = make(map[string]*sql.Stmt)\n"
+	if len(nqs) > 0 {
+		t += "queries = map[string]*NamedQuery{\n"
+		for _, nq := range nqs {
+			t += `"` + nq.Name + `": {QueryEncoded: "` + nq.QueryEncoded + `"},` + "\n"
+		}
+		t += "}\n"
+	}
 	t += ")\n\n"
+
+	if len(nqs) > 0 {
+		t += "type NamedQuery struct {\n"
+		t += "\tName string\n"
+		t += "\tQuery string\n"
+		t += "\tQueryEncoded string\n"
+		t += "}\n\n"
+	}
+
 	return t
 }
 
@@ -80,9 +106,19 @@ func GetStruct(tfs []conf.TableField) string {
 	return t
 }
 
-func GetGeneralFunctions(tfs []conf.TableField) string {
-	t := "func SetDB(x *sql.DB) {\n"
+func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
+	t := "func SetDB(x *sql.DB) error {\n"
 	t += "	db = x\n"
+	if len(nqs) > 0 {
+		t += "    for _, q := range queries {\n"
+		t += "        b, err := base64.StdEncoding.DecodeString(q.QueryEncoded)\n"
+		t += "        if err != nil {\n"
+		t += "            return err\n"
+		t += "        }\n"
+		t += "        q.Query = string(b)\n"
+		t += "    }\n"
+	}
+	t += "    return nil\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) GetFieldValue(field string) any {\n"
@@ -632,6 +668,156 @@ func GetDBFunctions() string {
 	t += "    _, err = x.DBExistsCtxTx(ctx, tx, fields)\n"
 	t += "    return err\n"
 	t += "}\n\n"
+
+	return t
+}
+
+func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
+	t := ""
+
+	for _, nq := range nqs {
+		mode := strings.ToLower(nq.Mode)
+		if mode == "" {
+			mode = "many"
+		}
+		hasParams := strings.Contains(nq.Query, "?")
+
+		fieldsLit := "nil"
+		if mode != "exec" {
+			fs := make([]string, 0, len(nq.Returns))
+			for _, r := range nq.Returns {
+				fs = append(fs, "Field"+db.NormalizeString(r))
+			}
+			fieldsLit = "[]string{" + strings.Join(fs, ",") + "}"
+		}
+
+		switch mode {
+		case "exec":
+			// core via execCore
+			t += "func Exec" + nq.Name + "("
+			if hasParams {
+				t += "args ...any"
+			}
+			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(nil, nil, q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n"
+
+			t += "func Exec" + nq.Name + "Ctx(ctx context.Context"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(&ctx, nil, q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n"
+
+			t += "func Exec" + nq.Name + "Tx(tx *sql.Tx"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(nil, tx, q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n"
+
+			t += "func Exec" + nq.Name + "CtxTx(ctx context.Context, tx *sql.Tx"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(&ctx, tx, q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n\n"
+
+		case "one":
+			// core uses queryCore + first element or nil
+			t += "func Query" + nq.Name + "("
+			if hasParams {
+				t += "args ...any"
+			}
+			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(nil, nil, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += "); if err != nil { return nil, err }; if len(out) == 0 { return nil, nil }; return out[0], nil }\n"
+
+			t += "func Query" + nq.Name + "Ctx(ctx context.Context"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(&ctx, nil, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += "); if err != nil { return nil, err }; if len(out) == 0 { return nil, nil }; return out[0], nil }\n"
+
+			t += "func Query" + nq.Name + "Tx(tx *sql.Tx"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(nil, tx, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += "); if err != nil { return nil, err }; if len(out) == 0 { return nil, nil }; return out[0], nil }\n"
+
+			t += "func Query" + nq.Name + "CtxTx(ctx context.Context, tx *sql.Tx"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(&ctx, tx, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += "); if err != nil { return nil, err }; if len(out) == 0 { return nil, nil }; return out[0], nil }\n\n"
+
+		default: // many
+			t += "func Query" + nq.Name + "("
+			if hasParams {
+				t += "args ...any"
+			}
+			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(nil, nil, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n"
+
+			t += "func Query" + nq.Name + "Ctx(ctx context.Context"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(&ctx, nil, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n"
+
+			t += "func Query" + nq.Name + "Tx(tx *sql.Tx"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(nil, tx, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n"
+
+			t += "func Query" + nq.Name + "CtxTx(ctx context.Context, tx *sql.Tx"
+			if hasParams {
+				t += ", args ...any"
+			}
+			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(&ctx, tx, " + fieldsLit + ", q.Query"
+			if hasParams {
+				t += ", args..."
+			}
+			t += ") }\n\n"
+		}
+	}
 
 	return t
 }
