@@ -312,7 +312,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 
 		// guard: enforce Returns for query modes
 		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) == 0 {
-			s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
+			s := "func " + coreName + "(ctx context.Context, tx *sql.Tx"
 			if hasParams {
 				s += ", args ...any"
 			}
@@ -323,7 +323,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 			return s
 		}
 
-		s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
+		s := "func " + coreName + "(ctx context.Context, tx *sql.Tx"
 		if hasParams {
 			s += ", args ...any"
 		}
@@ -445,7 +445,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		coreArgs := func(withCtx, withTx bool) string {
 			a := ""
 			if withCtx {
-				a += "&ctx"
+				a += "ctx"
 			} else {
 				a += "nil"
 			}

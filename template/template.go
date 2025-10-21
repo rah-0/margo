@@ -271,7 +271,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "	return tx.Stmt(base), true\n"
 	t += "}\n\n"
 
-	t += "func execCore(ctx *context.Context, tx *sql.Tx, query string, args ...any) (res sql.Result, err error) {\n"
+	t += "func execCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (res sql.Result, err error) {\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
 	t += "	if err != nil { return nil, err }\n"
 	t += "	var c context.Context\n"
@@ -282,7 +282,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "	return s.Exec(args...)\n"
 	t += "}\n\n"
 
-	t += "func queryCore(ctx *context.Context, tx *sql.Tx, fields []string, query string, args ...any) (out []*Entity, err error) {\n"
+	t += "func queryCore(ctx context.Context, tx *sql.Tx, fields []string, query string, args ...any) (out []*Entity, err error) {\n"
 	t += "    stmt, err := getPreparedStmt(query)\n"
 	t += "    if err != nil { return nil, err }\n"
 	t += "    var c context.Context\n"
@@ -295,7 +295,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "    return readRows(fields, rows)\n"
 	t += "}\n\n"
 
-	t += "func scalarCore(ctx *context.Context, tx *sql.Tx, query string, args ...any) (int, error) {\n"
+	t += "func scalarCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (int, error) {\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
 	t += "	if err != nil { return 0, err }\n"
 	t += "	var c context.Context\n"
@@ -314,9 +314,9 @@ func GetDBFunctions() string {
 	t := ""
 
 	t += "func DBTruncate() (sql.Result, error) { return execCore(nil, nil, \"TRUNCATE TABLE \"+FQTN) }\n"
-	t += "func DBTruncateCtx(ctx context.Context) (sql.Result, error) { return execCore(&ctx, nil, \"TRUNCATE TABLE \"+FQTN) }\n"
+	t += "func DBTruncateCtx(ctx context.Context) (sql.Result, error) { return execCore(ctx, nil, \"TRUNCATE TABLE \"+FQTN) }\n"
 	t += "func DBTruncateTx(tx *sql.Tx) (sql.Result, error) { return execCore(nil, tx, \"TRUNCATE TABLE \"+FQTN) }\n"
-	t += "func DBTruncateCtxTx(ctx context.Context, tx *sql.Tx) (sql.Result, error) { return execCore(&ctx, tx, \"TRUNCATE TABLE \"+FQTN) }\n\n"
+	t += "func DBTruncateCtxTx(ctx context.Context, tx *sql.Tx) (sql.Result, error) { return execCore(ctx, tx, \"TRUNCATE TABLE \"+FQTN) }\n\n"
 
 	t += "func (x *Entity) DBInsert(fieldsToInsert []string) (sql.Result, error) {\n"
 	t += "	q := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(GetQualifiedFields(fieldsToInsert), \", \") + \") VALUES (\" + strings.Join(GetValuesPlaceholders(fieldsToInsert), \", \") + \")\"\n"
@@ -324,7 +324,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBInsertCtx(ctx context.Context, fieldsToInsert []string) (sql.Result, error) {\n"
 	t += "	q := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(GetQualifiedFields(fieldsToInsert), \", \") + \") VALUES (\" + strings.Join(GetValuesPlaceholders(fieldsToInsert), \", \") + \")\"\n"
-	t += "	return execCore(&ctx, nil, q, x.GetFieldsValues(fieldsToInsert)...)\n"
+	t += "	return execCore(ctx, nil, q, x.GetFieldsValues(fieldsToInsert)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBInsertTx(tx *sql.Tx, fieldsToInsert []string) (sql.Result, error) {\n"
 	t += "	q := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(GetQualifiedFields(fieldsToInsert), \", \") + \") VALUES (\" + strings.Join(GetValuesPlaceholders(fieldsToInsert), \", \") + \")\"\n"
@@ -332,7 +332,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBInsertCtxTx(ctx context.Context, tx *sql.Tx, fieldsToInsert []string) (sql.Result, error) {\n"
 	t += "	q := \"INSERT INTO \" + FQTN + \" (\" + strings.Join(GetQualifiedFields(fieldsToInsert), \", \") + \") VALUES (\" + strings.Join(GetValuesPlaceholders(fieldsToInsert), \", \") + \")\"\n"
-	t += "	return execCore(&ctx, tx, q, x.GetFieldsValues(fieldsToInsert)...)\n"
+	t += "	return execCore(ctx, tx, q, x.GetFieldsValues(fieldsToInsert)...)\n"
 	t += "}\n\n"
 
 	// DELETE ... WHERE ... AND ...
@@ -342,7 +342,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBDeleteWhereAllCtx(ctx context.Context, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"DELETE FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
-	t += "	return execCore(&ctx, nil, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return execCore(ctx, nil, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBDeleteWhereAllTx(tx *sql.Tx, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"DELETE FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
@@ -350,7 +350,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBDeleteWhereAllCtxTx(ctx context.Context, tx *sql.Tx, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"DELETE FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
-	t += "	return execCore(&ctx, tx, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return execCore(ctx, tx, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 
 	// DELETE ... WHERE ... OR ...
@@ -360,7 +360,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBDeleteWhereAnyCtx(ctx context.Context, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"DELETE FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
-	t += "	return execCore(&ctx, nil, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return execCore(ctx, nil, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBDeleteWhereAnyTx(tx *sql.Tx, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"DELETE FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
@@ -368,7 +368,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBDeleteWhereAnyCtxTx(ctx context.Context, tx *sql.Tx, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"DELETE FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
-	t += "	return execCore(&ctx, tx, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return execCore(ctx, tx, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 
 	// UPDATE ... SET ... WHERE ... AND ...
@@ -380,7 +380,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBUpdateWhereAllCtx(ctx context.Context, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(fieldsToUpdate), x.GetFieldsValues(fieldsToMatch)...)\n"
-	t += "	return execCore(&ctx, nil, q, vals...)\n"
+	t += "	return execCore(ctx, nil, q, vals...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBUpdateWhereAllTx(tx *sql.Tx, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
@@ -390,7 +390,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBUpdateWhereAllCtxTx(ctx context.Context, tx *sql.Tx, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(fieldsToUpdate), x.GetFieldsValues(fieldsToMatch)...)\n"
-	t += "	return execCore(&ctx, tx, q, vals...)\n"
+	t += "	return execCore(ctx, tx, q, vals...)\n"
 	t += "}\n\n"
 
 	// UPDATE ... WHERE ... OR ...
@@ -402,7 +402,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBUpdateWhereAnyCtx(ctx context.Context, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(fieldsToUpdate), x.GetFieldsValues(fieldsToMatch)...)\n"
-	t += "	return execCore(&ctx, nil, q, vals...)\n"
+	t += "	return execCore(ctx, nil, q, vals...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBUpdateWhereAnyTx(tx *sql.Tx, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
@@ -412,7 +412,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBUpdateWhereAnyCtxTx(ctx context.Context, tx *sql.Tx, fieldsToUpdate, fieldsToMatch []string) (sql.Result, error) {\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(fieldsToUpdate), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(fieldsToUpdate), x.GetFieldsValues(fieldsToMatch)...)\n"
-	t += "	return execCore(&ctx, tx, q, vals...)\n"
+	t += "	return execCore(ctx, tx, q, vals...)\n"
 	t += "}\n\n"
 
 	// SELECT * (well: Fields)
@@ -422,7 +422,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSelectAllCtx(ctx context.Context) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN\n"
-	t += "	return queryCore(&ctx, nil, Fields, q)\n"
+	t += "	return queryCore(ctx, nil, Fields, q)\n"
 	t += "}\n\n"
 	t += "func DBSelectAllTx(tx *sql.Tx) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN\n"
@@ -430,7 +430,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSelectAllCtxTx(ctx context.Context, tx *sql.Tx) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN\n"
-	t += "	return queryCore(&ctx, tx, Fields, q)\n"
+	t += "	return queryCore(ctx, tx, Fields, q)\n"
 	t += "}\n\n"
 
 	// SELECT with custom field list
@@ -440,7 +440,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSelectAllWithFieldsCtx(ctx context.Context, fields []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(fields), \", \") + \" FROM \" + FQTN\n"
-	t += "	return queryCore(&ctx, nil, fields, q)\n"
+	t += "	return queryCore(ctx, nil, fields, q)\n"
 	t += "}\n\n"
 	t += "func DBSelectAllWithFieldsTx(tx *sql.Tx, fields []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(fields), \", \") + \" FROM \" + FQTN\n"
@@ -448,7 +448,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSelectAllWithFieldsCtxTx(ctx context.Context, tx *sql.Tx, fields []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(fields), \", \") + \" FROM \" + FQTN\n"
-	t += "	return queryCore(&ctx, tx, fields, q)\n"
+	t += "	return queryCore(ctx, tx, fields, q)\n"
 	t += "}\n\n"
 
 	// Plain subquery over Fields
@@ -458,7 +458,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSubquerySelectAllCtx(ctx context.Context, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" \" + subquery\n"
-	t += "	return queryCore(&ctx, nil, Fields, q, args...)\n"
+	t += "	return queryCore(ctx, nil, Fields, q, args...)\n"
 	t += "}\n\n"
 	t += "func DBSubquerySelectAllTx(tx *sql.Tx, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" \" + subquery\n"
@@ -466,7 +466,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSubquerySelectAllCtxTx(ctx context.Context, tx *sql.Tx, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" \" + subquery\n"
-	t += "	return queryCore(&ctx, tx, Fields, q, args...)\n"
+	t += "	return queryCore(ctx, tx, Fields, q, args...)\n"
 	t += "}\n\n"
 
 	// Subquery with custom fields
@@ -476,7 +476,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSubquerySelectAllWithFieldsCtx(ctx context.Context, fields []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(fields), \", \") + \" FROM \" + FQTN + \" \" + subquery\n"
-	t += "	return queryCore(&ctx, nil, fields, q, args...)\n"
+	t += "	return queryCore(ctx, nil, fields, q, args...)\n"
 	t += "}\n\n"
 	t += "func DBSubquerySelectAllWithFieldsTx(tx *sql.Tx, fields []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(fields), \", \") + \" FROM \" + FQTN + \" \" + subquery\n"
@@ -484,7 +484,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func DBSubquerySelectAllWithFieldsCtxTx(ctx context.Context, tx *sql.Tx, fields []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(fields), \", \") + \" FROM \" + FQTN + \" \" + subquery\n"
-	t += "	return queryCore(&ctx, tx, fields, q, args...)\n"
+	t += "	return queryCore(ctx, tx, fields, q, args...)\n"
 	t += "}\n\n"
 
 	// Subquery + WHERE AND/OR
@@ -496,7 +496,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBSubquerySelectAllWhereAllCtx(ctx context.Context, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE (\" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?) \" + subquery\n"
 	t += "	allArgs := append(x.GetFieldsValues(fieldsToMatch), args...)\n"
-	t += "	return queryCore(&ctx, nil, Fields, q, allArgs...)\n"
+	t += "	return queryCore(ctx, nil, Fields, q, allArgs...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBSubquerySelectAllWhereAllTx(tx *sql.Tx, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE (\" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?) \" + subquery\n"
@@ -506,7 +506,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBSubquerySelectAllWhereAllCtxTx(ctx context.Context, tx *sql.Tx, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE (\" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?) \" + subquery\n"
 	t += "	allArgs := append(x.GetFieldsValues(fieldsToMatch), args...)\n"
-	t += "	return queryCore(&ctx, tx, Fields, q, allArgs...)\n"
+	t += "	return queryCore(ctx, tx, Fields, q, allArgs...)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBSubquerySelectAllWhereAny(fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
@@ -517,7 +517,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBSubquerySelectAllWhereAnyCtx(ctx context.Context, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE (\" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?) \" + subquery\n"
 	t += "	allArgs := append(x.GetFieldsValues(fieldsToMatch), args...)\n"
-	t += "	return queryCore(&ctx, nil, Fields, q, allArgs...)\n"
+	t += "	return queryCore(ctx, nil, Fields, q, allArgs...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBSubquerySelectAllWhereAnyTx(tx *sql.Tx, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE (\" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?) \" + subquery\n"
@@ -527,7 +527,7 @@ func GetDBFunctions() string {
 	t += "func (x *Entity) DBSubquerySelectAllWhereAnyCtxTx(ctx context.Context, tx *sql.Tx, fieldsToMatch []string, subquery string, args ...any) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE (\" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?) \" + subquery\n"
 	t += "	allArgs := append(x.GetFieldsValues(fieldsToMatch), args...)\n"
-	t += "	return queryCore(&ctx, tx, Fields, q, allArgs...)\n"
+	t += "	return queryCore(ctx, tx, Fields, q, allArgs...)\n"
 	t += "}\n\n"
 
 	// AND
@@ -537,7 +537,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBSelectAllWhereAllCtx(ctx context.Context, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
-	t += "	return queryCore(&ctx, nil, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return queryCore(ctx, nil, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBSelectAllWhereAllTx(tx *sql.Tx, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
@@ -545,7 +545,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBSelectAllWhereAllCtxTx(ctx context.Context, tx *sql.Tx, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? AND \") + \" = ?\"\n"
-	t += "	return queryCore(&ctx, tx, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return queryCore(ctx, tx, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 
 	// OR
@@ -555,7 +555,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBSelectAllWhereAnyCtx(ctx context.Context, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
-	t += "	return queryCore(&ctx, nil, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return queryCore(ctx, nil, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBSelectAllWhereAnyTx(tx *sql.Tx, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
@@ -563,7 +563,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBSelectAllWhereAnyCtxTx(ctx context.Context, tx *sql.Tx, fieldsToMatch []string) ([]*Entity, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fieldsToMatch), \" = ? OR \") + \" = ?\"\n"
-	t += "	return queryCore(&ctx, tx, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
+	t += "	return queryCore(ctx, tx, Fields, q, x.GetFieldsValues(fieldsToMatch)...)\n"
 	t += "}\n\n"
 
 	//Exists
@@ -577,7 +577,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBExistsCtx(ctx context.Context, fields []string) (bool, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? AND \") + \" = ? LIMIT 1\"\n"
-	t += "	res, err := queryCore(&ctx, nil, Fields, q, x.GetFieldsValues(fields)...)\n"
+	t += "	res, err := queryCore(ctx, nil, Fields, q, x.GetFieldsValues(fields)...)\n"
 	t += "	if err != nil { return false, err }\n"
 	t += "	if len(res) == 0 { return false, nil }\n"
 	t += "	*x = *res[0]\n"
@@ -593,7 +593,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBExistsCtxTx(ctx context.Context, tx *sql.Tx, fields []string) (bool, error) {\n"
 	t += "	q := \"SELECT \" + strings.Join(GetQualifiedFields(Fields), \", \") + \" FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? AND \") + \" = ? LIMIT 1\"\n"
-	t += "	res, err := queryCore(&ctx, tx, Fields, q, x.GetFieldsValues(fields)...)\n"
+	t += "	res, err := queryCore(ctx, tx, Fields, q, x.GetFieldsValues(fields)...)\n"
 	t += "	if err != nil { return false, err }\n"
 	t += "	if len(res) == 0 { return false, nil }\n"
 	t += "	*x = *res[0]\n"
@@ -607,7 +607,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBCountWhereAllCtx(ctx context.Context, fields []string) (int, error) {\n"
 	t += "	q := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? AND \") + \" = ?\"\n"
-	t += "	return scalarCore(&ctx, nil, q, x.GetFieldsValues(fields)...)\n"
+	t += "	return scalarCore(ctx, nil, q, x.GetFieldsValues(fields)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBCountWhereAllTx(tx *sql.Tx, fields []string) (int, error) {\n"
 	t += "	q := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? AND \") + \" = ?\"\n"
@@ -615,7 +615,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBCountWhereAllCtxTx(ctx context.Context, tx *sql.Tx, fields []string) (int, error) {\n"
 	t += "	q := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? AND \") + \" = ?\"\n"
-	t += "	return scalarCore(&ctx, tx, q, x.GetFieldsValues(fields)...)\n"
+	t += "	return scalarCore(ctx, tx, q, x.GetFieldsValues(fields)...)\n"
 	t += "}\n\n"
 
 	// OR
@@ -625,7 +625,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBCountWhereAnyCtx(ctx context.Context, fields []string) (int, error) {\n"
 	t += "	q := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? OR \") + \" = ?\"\n"
-	t += "	return scalarCore(&ctx, nil, q, x.GetFieldsValues(fields)...)\n"
+	t += "	return scalarCore(ctx, nil, q, x.GetFieldsValues(fields)...)\n"
 	t += "}\n\n"
 	t += "func (x *Entity) DBCountWhereAnyTx(tx *sql.Tx, fields []string) (int, error) {\n"
 	t += "	q := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? OR \") + \" = ?\"\n"
@@ -633,7 +633,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBCountWhereAnyCtxTx(ctx context.Context, tx *sql.Tx, fields []string) (int, error) {\n"
 	t += "	q := \"SELECT COUNT(*) FROM \" + FQTN + \" WHERE \" + strings.Join(GetQualifiedFields(fields), \" = ? OR \") + \" = ?\"\n"
-	t += "	return scalarCore(&ctx, tx, q, x.GetFieldsValues(fields)...)\n"
+	t += "	return scalarCore(ctx, tx, q, x.GetFieldsValues(fields)...)\n"
 	t += "}\n\n"
 
 	t += "func (x *Entity) DBFindOrCreate(fields []string) error {\n"
@@ -708,7 +708,7 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			if hasParams {
 				t += ", args ...any"
 			}
-			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(&ctx, nil, q.Query"
+			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(ctx, nil, q.Query"
 			if hasParams {
 				t += ", args..."
 			}
@@ -728,7 +728,7 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			if hasParams {
 				t += ", args ...any"
 			}
-			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(&ctx, tx, q.Query"
+			t += ") (sql.Result, error) { q := queries[\"" + nq.Name + "\"]; return execCore(ctx, tx, q.Query"
 			if hasParams {
 				t += ", args..."
 			}
@@ -750,7 +750,7 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			if hasParams {
 				t += ", args ...any"
 			}
-			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(&ctx, nil, " + fieldsLit + ", q.Query"
+			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(ctx, nil, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", args..."
 			}
@@ -770,7 +770,7 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			if hasParams {
 				t += ", args ...any"
 			}
-			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(&ctx, tx, " + fieldsLit + ", q.Query"
+			t += ") (*Entity, error) { q := queries[\"" + nq.Name + "\"]; out, err := queryCore(ctx, tx, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", args..."
 			}
@@ -791,7 +791,7 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			if hasParams {
 				t += ", args ...any"
 			}
-			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(&ctx, nil, " + fieldsLit + ", q.Query"
+			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(ctx, nil, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", args..."
 			}
@@ -811,7 +811,7 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			if hasParams {
 				t += ", args ...any"
 			}
-			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(&ctx, tx, " + fieldsLit + ", q.Query"
+			t += ") ([]*Entity, error) { q := queries[\"" + nq.Name + "\"]; return queryCore(ctx, tx, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", args..."
 			}
