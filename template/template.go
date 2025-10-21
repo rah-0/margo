@@ -271,7 +271,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "	return tx.Stmt(base), true\n"
 	t += "}\n\n"
 
-	t += "func execCore(ctx *context.Context, tx *sql.Tx, query string, args ...any) (res sql.Result, err error) {\n"
+	t += "func execCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (res sql.Result, err error) {\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
 	t += "	if err != nil { return nil, err }\n"
 	t += "	var c context.Context\n"
@@ -282,7 +282,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "	return s.Exec(args...)\n"
 	t += "}\n\n"
 
-	t += "func queryCore(ctx *context.Context, tx *sql.Tx, fields []string, query string, args ...any) (out []*Entity, err error) {\n"
+	t += "func queryCore(ctx context.Context, tx *sql.Tx, fields []string, query string, args ...any) (out []*Entity, err error) {\n"
 	t += "    stmt, err := getPreparedStmt(query)\n"
 	t += "    if err != nil { return nil, err }\n"
 	t += "    var c context.Context\n"
@@ -295,7 +295,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "    return readRows(fields, rows)\n"
 	t += "}\n\n"
 
-	t += "func scalarCore(ctx *context.Context, tx *sql.Tx, query string, args ...any) (int, error) {\n"
+	t += "func scalarCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (int, error) {\n"
 	t += "	stmt, err := getPreparedStmt(query)\n"
 	t += "	if err != nil { return 0, err }\n"
 	t += "	var c context.Context\n"
