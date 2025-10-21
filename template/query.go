@@ -312,7 +312,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 
 		// guard: enforce Returns for query modes
 		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) == 0 {
-			s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
+			s := "func " + coreName + "(ctx context.Context, tx *sql.Tx"
 			if hasParams {
 				s += ", args ...any"
 			}
@@ -323,7 +323,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 			return s
 		}
 
-		s := "func " + coreName + "(ctx *context.Context, tx *sql.Tx"
+		s := "func " + coreName + "(ctx context.Context, tx *sql.Tx"
 		if hasParams {
 			s += ", args ...any"
 		}
@@ -332,16 +332,16 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		s += "base, err := getPreparedStmt(q.Query)\n"
 		s += "if err != nil { return }\n\n"
 		s += "var c context.Context\n"
-		s += "if ctx != nil { c = *ctx }\n\n"
+		s += "if ctx != nil { c = ctx }\n\n"
 		s += "stmt, needClose := bindStmtCtxTx(base, c, tx)\n"
 		s += "if needClose { defer func(){ if cerr := stmt.Close(); err == nil && cerr != nil { err = cerr } }() }\n\n"
 
 		switch mode {
 		case conf.ResultModeExec:
 			if hasParams {
-				s += "if ctx != nil { res, err = stmt.ExecContext(*ctx, args...) } else { res, err = stmt.Exec(args...) }\n"
+				s += "if ctx != nil { res, err = stmt.ExecContext(ctx, args...) } else { res, err = stmt.Exec(args...) }\n"
 			} else {
-				s += "if ctx != nil { res, err = stmt.ExecContext(*ctx) } else { res, err = stmt.Exec() }\n"
+				s += "if ctx != nil { res, err = stmt.ExecContext(ctx) } else { res, err = stmt.Exec() }\n"
 			}
 			s += "return\n"
 			s += "}\n\n"
@@ -353,9 +353,9 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				s += "var ptr" + db.NormalizeString(f) + " *string\n"
 			}
 			if hasParams {
-				s += "if ctx != nil { err = stmt.QueryRowContext(*ctx, args...).Scan("
+				s += "if ctx != nil { err = stmt.QueryRowContext(ctx, args...).Scan("
 			} else {
-				s += "if ctx != nil { err = stmt.QueryRowContext(*ctx).Scan("
+				s += "if ctx != nil { err = stmt.QueryRowContext(ctx).Scan("
 			}
 			for i, f := range fields {
 				if i > 0 {
@@ -390,9 +390,9 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 			// materialize all rows
 			s += "var rows *sql.Rows\n"
 			if hasParams {
-				s += "if ctx != nil { rows, err = stmt.QueryContext(*ctx, args...) } else { rows, err = stmt.Query(args...) }\n"
+				s += "if ctx != nil { rows, err = stmt.QueryContext(ctx, args...) } else { rows, err = stmt.Query(args...) }\n"
 			} else {
-				s += "if ctx != nil { rows, err = stmt.QueryContext(*ctx) } else { rows, err = stmt.Query() }\n"
+				s += "if ctx != nil { rows, err = stmt.QueryContext(ctx) } else { rows, err = stmt.Query() }\n"
 			}
 			s += "if err != nil { return }\n"
 			s += "defer rows.Close()\n\n"
@@ -445,7 +445,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		coreArgs := func(withCtx, withTx bool) string {
 			a := ""
 			if withCtx {
-				a += "&ctx"
+				a += "ctx"
 			} else {
 				a += "nil"
 			}
