@@ -58,38 +58,34 @@ margo -dbUser="your_db_user" \
       -dbIp="localhost" \
       -dbPort="3306" \
       -outputPath="/path/must/be/directory" \
-      -queriesPath="/path/must/be/file.sql"
+      -queriesPath="/path/must/be/directory"
 ```
 
 ### CLI Parameters
 
-| Parameter     | Description                                   | Default | Required |
-|---------------|-----------------------------------------------|---------|----------|
-| `-dbUser`     | Database username                             | -       | Yes      |
-| `-dbPassword` | Database password                             | -       | Yes      |
-| `-dbName`     | Database name                                 | -       | Yes      |
-| `-dbIp`       | Database IP address                           | -       | Yes      |
-| `-dbPort`     | Database port                                 | 3306    | Yes      |
-| `-outputPath` | Directory where generated files will be saved | -       | Yes      |
-| `-queriesPath`| Optional path for SQL queries file            | -       | No       |
+| Parameter     | Description                                        | Default | Required |
+|---------------|----------------------------------------------------|---------|----------|
+| `-dbUser`     | Database username                                  | -       | Yes      |
+| `-dbPassword` | Database password                                  | -       | Yes      |
+| `-dbName`     | Database name                                      | -       | Yes      |
+| `-dbIp`       | Database IP address                                | -       | Yes      |
+| `-dbPort`     | Database port                                      | 3306    | Yes      |
+| `-outputPath` | Directory where generated files will be saved      | -       | Yes      |
+| `-queriesPath`| Optional path to directory containing .sql files   | -       | No       |
 
 ## Custom SQL Queries
 
-MarGO can turn tagged SQL into type-safe Go functions:
+MarGO can turn SQL queries into type-safe Go functions:
 
 ### Requirements
 
-- All custom queries must be in a single file (specified by `-queriesPath`)
-- Each custom query must be prefixed with `-- Name: FunctionName`, [example](https://github.com/rah-0/margo/blob/master/doc/sql/queries.sql#L1). The generated function will look like [this](https://github.com/rah-0/margo-test/blob/master/dbs/Template/queries.go#L78)
-- Queries must end with a semicolon (`;`) and be separated by at least one newline
+- Each custom query must be in its own `.sql` file within the directory specified by `-queriesPath`
+- **File names must be in UpperCamelCase** (e.g., `GetUserById.sql`, `DeleteOldRecords.sql`) as they become the function names
+- The filename (without `.sql` extension) becomes the generated function name (e.g., `GetUserById.sql` → `QueryGetUserById()`)
 - No `SELECT *` queries are allowed, you must explicitly specify columns
+- See [example queries directory](https://github.com/rah-0/margo/tree/master/doc/sql/queries) for reference
 
 ## Supported Tags (SQL Generator)
-
-### Name
-- **Syntax:** `-- Name: SampleTest`
-- **Required**
-- Becomes the base name for generated functions/types.
 
 ### Params
 - **Syntax:** `-- Params: uuid_user id ...`
@@ -131,16 +127,17 @@ MarGO can turn tagged SQL into type-safe Go functions:
 - The generator normalizes to Go fields via `db.NormalizeString`  
   (`uuid`→`Uuid`, `last_update`→`LastUpdate`, `test_field`→`TestField`).
 
-**Example**
+**Example** (file: `GetRecentCats.sql`)
 ```sql
--- Name: GetRecentCats
 -- Returns: uuid last_update
 -- ResultMode: many
 -- MapAs: alpha
 SELECT uuid, last_update
 FROM alpha
-WHERE animal = 'cat' AND last_update > '2024-01-01 00:00:00.000000';
+WHERE animal = 'cat' AND last_update > '2024-01-01 00:00:00.000000'
 ```
+
+The filename `GetRecentCats.sql` becomes the function name `QueryGetRecentCats()`.
 
 ### Notes
 - Comments starting with `-- ...` or `# ...` are ignored.
@@ -164,10 +161,9 @@ func main() {
     }
     
     // Set the database connection for the generated packages
-    yourDatabase.SetDB(db)
-    // If you have custom queries the next lines aren't needed
-    yourDatabaseEntityA.SetDB(db)
-    yourDatabaseEntityB.SetDB(db)
+    if err := yourDatabase.SetDB(db); err != nil {
+	    // Handle error	
+	}
     
     // Now you can use your custom query
     users, err := yourDatabase.QueryFunctionName("admin")

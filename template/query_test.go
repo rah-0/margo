@@ -1,82 +1,12 @@
 package template
 
 import (
-	"reflect"
 	"testing"
 )
 
 func TestCreateGoFileQueries(t *testing.T) {
 	if _, err := CreateGoFileQueries(tableNames); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestSplitSQLQueries(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{
-			name:     "simple multiple queries",
-			input:    "SELECT 1; SELECT 2;",
-			expected: []string{"SELECT 1", "SELECT 2"},
-		},
-		{
-			name:     "semicolon inside string",
-			input:    "SELECT 'a;b;c'; SELECT 2;",
-			expected: []string{"SELECT 'a;b;c'", "SELECT 2"},
-		},
-		{
-			name:     "line comment with semicolon",
-			input:    "SELECT 1; -- this is a comment;\nSELECT 2;",
-			expected: []string{"SELECT 1", "SELECT 2"},
-		},
-		{
-			name: "multiline query",
-			input: `SELECT *
-FROM table
-WHERE col = 1;
-SELECT 2;`,
-			expected: []string{"SELECT *\nFROM table\nWHERE col = 1", "SELECT 2"},
-		},
-		{
-			name:     "no semicolon",
-			input:    "SELECT 1",
-			expected: []string{"SELECT 1"},
-		},
-		{
-			name:     "empty statements and whitespace",
-			input:    " ; \nSELECT 1; ; SELECT 2; ",
-			expected: []string{"SELECT 1", "SELECT 2"},
-		},
-		{
-			name:     "quote with inline comment-looking string",
-			input:    `SELECT '-- not a comment'; SELECT "/* also not a comment */";`,
-			expected: []string{"SELECT '-- not a comment'", `SELECT "/* also not a comment */"`},
-		},
-		{
-			name: "comment-only in between queries",
-			input: `SELECT 1; -- comment
-SELECT 2; /* ignored */ SELECT 3;`,
-			expected: []string{"SELECT 1", "SELECT 2", "SELECT 3"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			raw := SplitSQLQueries(tt.input)
-			named := ExtractNamedQueries(raw)
-
-			var actual []string
-			for _, nq := range named {
-				actual = append(actual, nq.Query)
-			}
-
-			if !reflect.DeepEqual(actual, tt.expected) {
-				t.Errorf("expected: %#v\ngot:      %#v", tt.expected, actual)
-			}
-		})
 	}
 }
 

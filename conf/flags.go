@@ -15,7 +15,7 @@ func CheckFlags() {
 	dbIp := flag.String("dbIp", "", "Required")
 	dbPort := flag.String("dbPort", "3306", "Required")
 	outputPath := flag.String("outputPath", "", "Required: path where .go files will be created.")
-	queriesPath := flag.String("queriesPath", "", "Optional: path for the file where SQL queries located.")
+	queriesPath := flag.String("queriesPath", "", "Optional: path to directory containing .sql query files.")
 	flag.Parse()
 
 	var missing []string
@@ -45,7 +45,20 @@ func CheckFlags() {
 			fmt.Fprintln(os.Stderr, " ", arg)
 		}
 		flag.Usage()
-		os.Exit(1)
+		return
+	}
+
+	// Validate queriesPath is a directory if specified
+	if *queriesPath != "" {
+		info, err := os.Stat(*queriesPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: queriesPath '%s' does not exist or is not accessible: %v\n", *queriesPath, err)
+			return
+		}
+		if !info.IsDir() {
+			fmt.Fprintf(os.Stderr, "Error: queriesPath '%s' must be a directory, not a file\n", *queriesPath)
+			return
+		}
 	}
 
 	Args.DBUser = *dbUser

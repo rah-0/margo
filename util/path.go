@@ -77,3 +77,24 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 
 	return "", nabu.FromError(errors.New("go.mod not found in any parent")).WithArgs(outputPath).Log()
 }
+
+// GetSQLFilesInDir returns all .sql file paths in the given directory.
+// It only returns direct descendants (non-recursive).
+func GetSQLFilesInDir(dirPath string) ([]string, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, nabu.FromError(err).WithArgs(dirPath).Log()
+	}
+
+	var sqlFiles []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(entry.Name()), ".sql") {
+			sqlFiles = append(sqlFiles, filepath.Join(dirPath, entry.Name()))
+		}
+	}
+
+	return sqlFiles, nil
+}

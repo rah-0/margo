@@ -17,37 +17,47 @@ import (
 var selectStarRegex = regexp.MustCompile(`(?i)select\s*\*`)
 
 func CreateGoFileQueries(tns []string) ([]conf.NamedQuery, error) {
-	if conf.Args.QueriesPath == "" {
-		return []conf.NamedQuery{}, nil
-	}
-
 	pathModuleOutput, err := util.GetGoModuleImportPath(conf.Args.OutputPath)
 	if err != nil {
 		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.OutputPath).Log()
 	}
 	pathModuleOutput = filepath.Join(pathModuleOutput, db.NormalizeString(conf.Args.DBName))
 
-	fq, err := util.ReadFileAsString(conf.Args.QueriesPath)
-	if err != nil {
-		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.QueriesPath).Log()
-	}
-
-	qs := SplitSQLQueries(fq)
-	if err = CheckNoSelectStar(qs); err != nil {
-		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(fq).Log()
-	}
-
-	nqs := ExtractNamedQueries(qs)
 	nqsGeneral := []conf.NamedQuery{}
 	nqsTableSpecific := []conf.NamedQuery{}
-	for _, nq := range nqs {
-		if nq.MapAs == "" {
-			nqsGeneral = append(nqsGeneral, nq)
-		} else {
-			nqsTableSpecific = append(nqsTableSpecific, nq)
+
+	// Only process queries if a queries path is provided
+	if conf.Args.QueriesPath != "" {
+		// Read all .sql files from directory
+		sqlFiles, err := util.GetSQLFilesInDir(conf.Args.QueriesPath)
+		if err != nil {
+			return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.QueriesPath).Log()
+		}
+
+		for _, sqlFile := range sqlFiles {
+			content, err := util.ReadFileAsString(sqlFile)
+			if err != nil {
+				return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(sqlFile).Log()
+			}
+			if err = CheckNoSelectStar([]string{content}); err != nil {
+				return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(sqlFile).Log()
+			}
+
+			// Extract query name from filename (without .sql extension)
+			baseName := filepath.Base(sqlFile)
+			queryName := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+
+			// Extract query with name from filename
+			nq := ExtractNamedQuery(content, queryName)
+			if nq.MapAs == "" {
+				nqsGeneral = append(nqsGeneral, nq)
+			} else {
+				nqsTableSpecific = append(nqsTableSpecific, nq)
+			}
 		}
 	}
 
+	// Always generate queries.go, even with no custom queries
 	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), "queries.go")
 	c := GetFileContentQueries(pathModuleOutput, tns, nqsGeneral)
 
@@ -55,21 +65,24 @@ func CreateGoFileQueries(tns []string) ([]conf.NamedQuery, error) {
 }
 
 func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
+	hasCustomQueries := len(nqs) > 0
 	t := "package " + db.NormalizeString(conf.Args.DBName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImportsQueries(pathModuleOutput, tns)
+	t += GetImportsQueries(pathModuleOutput, tns, hasCustomQueries)
 	t += GetVarsQueries(nqs)
-	t += GetStructsQueries()
-	t += GetGeneralFunctionsQueries(tns)
+	t += GetStructsQueries(hasCustomQueries)
+	t += GetGeneralFunctionsQueries(tns, hasCustomQueries)
 	t += GetDBFunctionsQueries(nqs)
 	return t
 }
 
-func GetImportsQueries(pathModuleOutput string, tns []string) string {
+func GetImportsQueries(pathModuleOutput string, tns []string, hasCustomQueries bool) string {
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
-	imports += `"encoding/base64"` + "\n"
+	if hasCustomQueries {
+		imports += `"encoding/base64"` + "\n"
+	}
 	imports += `"errors"` + "\n"
 	imports += `"sync"` + "\n\n"
 	for _, tn := range tns {
@@ -78,39 +91,6 @@ func GetImportsQueries(pathModuleOutput string, tns []string) string {
 	}
 	imports += ")\n\n"
 	return imports
-}
-
-func SplitSQLQueries(content string) []string {
-	var queries []string
-	var sb strings.Builder
-	inSingleQuote, inDoubleQuote := false, false
-
-	for i := 0; i < len(content); i++ {
-		c := content[i]
-
-		if c == '\'' && !inDoubleQuote {
-			inSingleQuote = !inSingleQuote
-		} else if c == '"' && !inSingleQuote {
-			inDoubleQuote = !inDoubleQuote
-		}
-
-		if c == ';' && !inSingleQuote && !inDoubleQuote {
-			trimmed := strings.TrimSpace(sb.String())
-			if trimmed != "" {
-				queries = append(queries, trimmed)
-			}
-			sb.Reset()
-			continue
-		}
-
-		sb.WriteByte(c)
-	}
-
-	trimmed := strings.TrimSpace(sb.String())
-	if trimmed != "" {
-		queries = append(queries, trimmed)
-	}
-	return queries
 }
 
 func StripSQLComments(s string) string {
@@ -185,25 +165,29 @@ func GetVarsQueries(nqs []conf.NamedQuery) string {
 	t += "db *sql.DB\n"
 	t += "stmtMu sync.RWMutex\n"
 	t += "stmtCache = make(map[string]*sql.Stmt)\n"
-	t += "queries = map[string]*NamedQuery{\n"
-	for _, q := range nqs {
-		t += `"` + q.Name + `": {QueryEncoded: "` + q.QueryEncoded + `"},` + "\n"
+	if len(nqs) > 0 {
+		t += "queries = map[string]*NamedQuery{\n"
+		for _, q := range nqs {
+			t += `"` + q.Name + `": {QueryEncoded: "` + q.QueryEncoded + `"},` + "\n"
+		}
+		t += "}\n"
 	}
-	t += "}\n"
 	t += ")\n\n"
 	return t
 }
 
-func GetGeneralFunctionsQueries(tns []string) string {
+func GetGeneralFunctionsQueries(tns []string, hasCustomQueries bool) string {
 	t := "func SetDB(x *sql.DB) error {\n"
 	t += "db = x\n\n"
-	t += "for _, q := range queries {\n"
-	t += "b, err := base64.StdEncoding.DecodeString(q.QueryEncoded)\n"
-	t += "if err != nil {\n"
-	t += "return err\n"
-	t += "}\n"
-	t += "q.Query = string(b)\n"
-	t += "}\n\n"
+	if hasCustomQueries {
+		t += "for _, q := range queries {\n"
+		t += "b, err := base64.StdEncoding.DecodeString(q.QueryEncoded)\n"
+		t += "if err != nil {\n"
+		t += "return err\n"
+		t += "}\n"
+		t += "q.Query = string(b)\n"
+		t += "}\n\n"
+	}
 	for _, tn := range tns {
 		t += "if err := " + db.NormalizeString(tn) + ".SetDB(x); err != nil {\n"
 		t += "return err\n"
@@ -295,54 +279,43 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		return s
 	}
 
-	genCore := func(nq conf.NamedQuery, mode string, fields []string, hasParams bool) string {
+	genCore := func(nq conf.NamedQuery, mode string, fields []string, hasParams bool, innerType string) string {
 		coreName := "query" + nq.Name
-		resType := "Query" + nq.Name + "Result"
-
-		// signatures
-		var ret string
-		switch mode {
-		case conf.ResultModeExec:
-			ret = "(res sql.Result, err error)"
-		case conf.ResultModeOne:
-			ret = "(_ *" + resType + ", err error)"
-		default: // many
-			ret = "(_ []" + resType + ", err error)"
+		resType := innerType
+		if resType == "" {
+			resType = "Query" + nq.Name + "ResultInner"
 		}
+
+		// signatures - all return *QueryResult now
+		ret := "(qr *Query" + nq.Name + "Result)"
 
 		// guard: enforce Returns for query modes
 		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) == 0 {
-			s := "func " + coreName + "(ctx context.Context, tx *sql.Tx"
-			if hasParams {
-				s += ", args ...any"
-			}
-			s += ") " + ret + " {\n"
-			s += `err = fmt.Errorf("named query ` + nq.Name + ` requires -- Returns: for ResultMode=` + mode + `")` + "\n"
+			s := "func " + coreName + "(ctx context.Context, tx *sql.Tx, params *QueryParams) " + ret + " {\n"
+			s += `qr = &Query` + nq.Name + `Result{Error: fmt.Errorf("named query ` + nq.Name + ` requires -- Returns: for ResultMode=` + mode + `")}` + "\n"
 			s += "return\n"
 			s += "}\n\n"
 			return s
 		}
 
-		s := "func " + coreName + "(ctx context.Context, tx *sql.Tx"
-		if hasParams {
-			s += ", args ...any"
-		}
-		s += ") " + ret + " {\n"
+		s := "func " + coreName + "(ctx context.Context, tx *sql.Tx, params *QueryParams) " + ret + " {\n"
+		s += "qr = &Query" + nq.Name + "Result{}\n"
 		s += "q := queries[\"" + nq.Name + "\"]\n"
 		s += "base, err := getPreparedStmt(q.Query)\n"
-		s += "if err != nil { return }\n\n"
-		s += "var c context.Context\n"
-		s += "if ctx != nil { c = ctx }\n\n"
-		s += "stmt, needClose := bindStmtCtxTx(base, c, tx)\n"
-		s += "if needClose { defer func(){ if cerr := stmt.Close(); err == nil && cerr != nil { err = cerr } }() }\n\n"
+		s += "if err != nil { qr.Error = err; return }\n\n"
+		s += "stmt, needClose := bindStmtCtxTx(base, ctx, tx)\n"
+		s += "if needClose { defer func(){ if cerr := stmt.Close(); err == nil && cerr != nil { qr.Error = cerr } }() }\n\n"
 
 		switch mode {
 		case conf.ResultModeExec:
+			s += "var res sql.Result\n"
 			if hasParams {
-				s += "if ctx != nil { res, err = stmt.ExecContext(ctx, args...) } else { res, err = stmt.Exec(args...) }\n"
+				s += "if ctx != nil { res, err = stmt.ExecContext(ctx, params.Params...) } else { res, err = stmt.Exec(params.Params...) }\n"
 			} else {
 				s += "if ctx != nil { res, err = stmt.ExecContext(ctx) } else { res, err = stmt.Exec() }\n"
 			}
+			s += "qr.Result = res\n"
+			s += "qr.Error = err\n"
 			s += "return\n"
 			s += "}\n\n"
 			return s
@@ -353,7 +326,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				s += "var ptr" + db.NormalizeString(f) + " *string\n"
 			}
 			if hasParams {
-				s += "if ctx != nil { err = stmt.QueryRowContext(ctx, args...).Scan("
+				s += "if ctx != nil { err = stmt.QueryRowContext(ctx, params.Params...).Scan("
 			} else {
 				s += "if ctx != nil { err = stmt.QueryRowContext(ctx).Scan("
 			}
@@ -365,7 +338,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 			}
 			s += ") } else { err = stmt.QueryRow("
 			if hasParams {
-				s += "args..."
+				s += "params.Params..."
 			}
 			s += ").Scan("
 			for i, f := range fields {
@@ -375,14 +348,15 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				s += "&ptr" + db.NormalizeString(f)
 			}
 			s += ") }\n"
-			s += "if errors.Is(err, sql.ErrNoRows) { return nil, nil }\n"
-			s += "if err != nil { return }\n\n"
+			s += "if errors.Is(err, sql.ErrNoRows) { return }\n"
+			s += "if err != nil { qr.Error = err; return }\n\n"
 			s += "x := &" + resType + "{}\n"
 			for _, f := range fields {
 				fn := db.NormalizeString(f)
 				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
 			}
-			s += "return x, nil\n"
+			s += "qr.Results = append(qr.Results, x)\n"
+			s += "return\n"
 			s += "}\n\n"
 			return s
 
@@ -390,13 +364,12 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 			// materialize all rows
 			s += "var rows *sql.Rows\n"
 			if hasParams {
-				s += "if ctx != nil { rows, err = stmt.QueryContext(ctx, args...) } else { rows, err = stmt.Query(args...) }\n"
+				s += "if ctx != nil { rows, err = stmt.QueryContext(ctx, params.Params...) } else { rows, err = stmt.Query(params.Params...) }\n"
 			} else {
 				s += "if ctx != nil { rows, err = stmt.QueryContext(ctx) } else { rows, err = stmt.Query() }\n"
 			}
-			s += "if err != nil { return }\n"
+			s += "if err != nil { qr.Error = err; return }\n"
 			s += "defer rows.Close()\n\n"
-			s += "var out []" + resType + "\n"
 			s += "for rows.Next() {\n"
 			for _, f := range fields {
 				s += "var ptr" + db.NormalizeString(f) + " *string\n"
@@ -408,16 +381,16 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				}
 				s += "&ptr" + db.NormalizeString(f)
 			}
-			s += "); err != nil { return }\n"
+			s += "); err != nil { qr.Error = err; return }\n"
 			s += "x := " + resType + "{}\n"
 			for _, f := range fields {
 				fn := db.NormalizeString(f)
 				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
 			}
-			s += "out = append(out, x)\n"
+			s += "qr.Results = append(qr.Results, &x)\n"
 			s += "}\n"
-			s += "if err = rows.Err(); err != nil { return }\n"
-			s += "return out, nil\n"
+			s += "if err = rows.Err(); err != nil { qr.Error = err; return }\n"
+			s += "return\n"
 			s += "}\n\n"
 			return s
 		}
@@ -427,7 +400,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		core := "query" + nq.Name
 		resType := "Query" + nq.Name + "Result"
 
-		// params builder for wrappers
+		// params builder for wrappers - conditionally include params based on hasParams
 		params := func(withCtx, withTx bool) string {
 			var ps []string
 			if withCtx {
@@ -437,7 +410,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				ps = append(ps, "tx *sql.Tx")
 			}
 			if hasParams {
-				ps = append(ps, "args ...any")
+				ps = append(ps, "params *QueryParams")
 			}
 			return "(" + strings.Join(ps, ", ") + ")"
 		}
@@ -456,15 +429,14 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				a += "nil"
 			}
 			if hasParams {
-				a += ", args..."
+				a += ", params"
+			} else {
+				a += ", nil"
 			}
 			return a
 		}
 
-		var retMany, retOne, retExec string
-		retMany = "([]" + resType + ", error)"
-		retOne = "(*" + resType + ", error)"
-		retExec = "(sql.Result, error)"
+		ret := "*" + resType
 
 		namePrefix := ""
 		switch mode {
@@ -477,24 +449,10 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		}
 
 		s := ""
-
-		switch mode {
-		case conf.ResultModeExec:
-			s += "func " + namePrefix + params(false, false) + " " + retExec + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
-			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retExec + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
-			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retExec + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
-			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retExec + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
-		case conf.ResultModeOne:
-			s += "func " + namePrefix + params(false, false) + " " + retOne + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
-			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retOne + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
-			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retOne + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
-			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retOne + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
-		default: // Many
-			s += "func " + namePrefix + params(false, false) + " " + retMany + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
-			s += "func " + namePrefix + "Ctx" + params(true, false) + " " + retMany + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
-			s += "func " + namePrefix + "Tx" + params(false, true) + " " + retMany + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
-			s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + retMany + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
-		}
+		s += "func " + namePrefix + params(false, false) + " " + ret + " { return " + core + "(" + coreArgs(false, false) + ") }\n"
+		s += "func " + namePrefix + "Ctx" + params(true, false) + " " + ret + " { return " + core + "(" + coreArgs(true, false) + ") }\n"
+		s += "func " + namePrefix + "Tx" + params(false, true) + " " + ret + " { return " + core + "(" + coreArgs(false, true) + ") }\n"
+		s += "func " + namePrefix + "CtxTx" + params(true, true) + " " + ret + " { return " + core + "(" + coreArgs(true, true) + ") }\n\n"
 		return s
 	}
 
@@ -506,91 +464,106 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		fields := nq.Returns
 		hasParams := strings.Contains(nq.Query, "?")
 
-		// struct for query modes
+		// struct for query modes - generate inner result struct if needed
+		innerType := ""
 		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) > 0 {
-			t += genResultStruct("Query"+nq.Name+"Result", fields)
+			innerType = "Query" + nq.Name + "ResultInner"
+			t += genResultStruct(innerType, fields)
 		}
+
+		// generate QueryResult wrapper struct
+		t += "type Query" + nq.Name + "Result struct {\n"
+		if innerType != "" {
+			t += "Results []*" + innerType + "\n"
+		}
+		t += "Error error\n"
+		t += "Result sql.Result\n"
+		t += "}\n\n"
+
 		// core + 4 wrappers
-		t += genCore(nq, mode, fields, hasParams)
+		t += genCore(nq, mode, fields, hasParams, innerType)
 		t += genWrappers(nq, mode, fields, hasParams)
 	}
 
 	return t
 }
 
-func GetStructsQueries() string {
+func GetStructsQueries(hasCustomQueries bool) string {
+	if !hasCustomQueries {
+		return ""
+	}
+
 	t := "type NamedQuery struct {\n"
 	t += "Name string\n"
 	t += "Query string\n"
 	t += "QueryEncoded string\n"
 	t += "}\n\n"
 
+	t += "type QueryParams struct {\n"
+	t += "Params []any\n"
+	t += "}\n\n"
+
+	t += "func NewQueryParams() *QueryParams {\n"
+	t += "return &QueryParams{}\n"
+	t += "}\n\n"
+
+	t += "func (qp *QueryParams) WithParams(params ...any) *QueryParams {\n"
+	t += "qp.Params = params\n"
+	t += "return qp\n"
+	t += "}\n\n"
+
 	return t
 }
 
-func ExtractNamedQueries(rawQueries []string) []conf.NamedQuery {
-	out := make([]conf.NamedQuery, 0, len(rawQueries))
+func ExtractNamedQuery(content string, name string) conf.NamedQuery {
+	var (
+		params, returns []string
+		mode            = conf.ResultModeMany
+		cleanLines      []string
+		mapAs           string
+	)
 
-	for _, raw := range rawQueries {
-		var (
-			name            string
-			params, returns []string
-			mode            = conf.ResultModeMany
-			cleanLines      []string
-			mapAs           string
-		)
+	for _, line := range strings.Split(content, "\n") {
+		trim := strings.TrimSpace(line)
 
-		for _, line := range strings.Split(raw, "\n") {
-			trim := strings.TrimSpace(line)
-
-			if v, ok := util.TrimPrefixCase(trim, "-- Name:"); ok {
-				name = v
-				continue
+		if v, ok := util.TrimPrefixCase(trim, "-- Params:"); ok {
+			if v != "" {
+				params = strings.Fields(v)
 			}
-			if v, ok := util.TrimPrefixCase(trim, "-- Params:"); ok {
-				if v != "" {
-					params = strings.Fields(v)
-				}
-				continue
-			}
-			if v, ok := util.TrimPrefixCase(trim, "-- Returns:"); ok {
-				if v != "" {
-					returns = strings.Fields(v)
-				}
-				continue
-			}
-			if v, ok := util.TrimPrefixCase(trim, "-- MapAs:"); ok {
-				if v != "" {
-					mapAs = v
-				}
-				continue
-			}
-			if v, ok := util.TrimPrefixCase(trim, "-- ResultMode:"); ok {
-				mode = util.ParseResultMode(v)
-				continue
-			}
-			// ignore other comment lines
-			if strings.HasPrefix(trim, "--") || strings.HasPrefix(trim, "#") {
-				continue
-			}
-			cleanLines = append(cleanLines, line)
-		}
-
-		clean := strings.TrimSpace(StripSQLComments(strings.Join(cleanLines, "\n")))
-		if clean == "" {
 			continue
 		}
-
-		out = append(out, conf.NamedQuery{
-			Name:         name,
-			Query:        clean,
-			QueryEncoded: base64.StdEncoding.EncodeToString([]byte(clean)),
-			Params:       params,
-			Returns:      returns,
-			Mode:         mode, // "many" | "one" | "exec"
-			MapAs:        mapAs,
-		})
+		if v, ok := util.TrimPrefixCase(trim, "-- Returns:"); ok {
+			if v != "" {
+				returns = strings.Fields(v)
+			}
+			continue
+		}
+		if v, ok := util.TrimPrefixCase(trim, "-- MapAs:"); ok {
+			if v != "" {
+				mapAs = v
+			}
+			continue
+		}
+		if v, ok := util.TrimPrefixCase(trim, "-- ResultMode:"); ok {
+			mode = util.ParseResultMode(v)
+			continue
+		}
+		// ignore other comment lines
+		if strings.HasPrefix(trim, "--") || strings.HasPrefix(trim, "#") {
+			continue
+		}
+		cleanLines = append(cleanLines, line)
 	}
 
-	return out
+	clean := strings.TrimSpace(StripSQLComments(strings.Join(cleanLines, "\n")))
+
+	return conf.NamedQuery{
+		Name:         name,
+		Query:        clean,
+		QueryEncoded: base64.StdEncoding.EncodeToString([]byte(clean)),
+		Params:       params,
+		Returns:      returns,
+		Mode:         mode, // "many" | "one" | "exec"
+		MapAs:        mapAs,
+	}
 }
