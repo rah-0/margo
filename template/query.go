@@ -355,7 +355,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				fn := db.NormalizeString(f)
 				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
 			}
-			s += "qr.Results = append(qr.Results, x)\n"
+			s += "qr.Entity = x\n"
 			s += "return\n"
 			s += "}\n\n"
 			return s
@@ -387,7 +387,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				fn := db.NormalizeString(f)
 				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
 			}
-			s += "qr.Results = append(qr.Results, &x)\n"
+			s += "qr.Entities = append(qr.Entities, &x)\n"
 			s += "}\n"
 			s += "if err = rows.Err(); err != nil { qr.Error = err; return }\n"
 			s += "return\n"
@@ -474,7 +474,11 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		// generate QueryResult wrapper struct
 		t += "type Query" + nq.Name + "Result struct {\n"
 		if innerType != "" {
-			t += "Results []*" + innerType + "\n"
+			if mode == conf.ResultModeOne {
+				t += "Entity *" + innerType + "\n"
+			} else {
+				t += "Entities []*" + innerType + "\n"
+			}
 		}
 		t += "Error error\n"
 		t += "Result sql.Result\n"
