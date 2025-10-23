@@ -356,6 +356,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				s += "if ptr" + fn + " != nil { x." + fn + " = *ptr" + fn + " } else { x." + fn + " = \"\" }\n"
 			}
 			s += "qr.Entity = x\n"
+			s += "qr.Exists = true\n"
 			s += "return\n"
 			s += "}\n\n"
 			return s
@@ -482,6 +483,9 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		}
 		t += "Error error\n"
 		t += "Result sql.Result\n"
+		if mode == conf.ResultModeOne {
+			t += "Exists bool\n"
+		}
 		t += "}\n\n"
 
 		// core + 4 wrappers

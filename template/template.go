@@ -146,6 +146,7 @@ func GetStruct(tfs []conf.TableField) string {
 	// QueryResult struct
 	t += "type QueryResult struct {\n"
 	t += "	Entities []*Entity\n"
+	t += "	Entity   *Entity\n"
 	t += "	Error    error\n"
 	t += "	Result   sql.Result\n"
 	t += "	Exists   bool\n"
@@ -337,6 +338,19 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "    if ctx != nil { rows, err = s.QueryContext(ctx, args...) } else { rows, err = s.Query(args...) }\n"
 	t += "    if err != nil { return nil, err }\n"
 	t += "    return readRows(fields, rows)\n"
+	t += "}\n\n"
+
+	t += "func queryOneCore(ctx context.Context, tx *sql.Tx, fields []string, query string, args ...any) (*Entity, error) {\n"
+	t += "    stmt, err := getPreparedStmt(query)\n"
+	t += "    if err != nil { return nil, err }\n"
+	t += "    s, needClose := bindStmtCtxTx(stmt, ctx, tx)\n"
+	t += "    if needClose { defer s.Close() }\n"
+	t += "    var rows *sql.Rows\n"
+	t += "    if ctx != nil { rows, err = s.QueryContext(ctx, args...) } else { rows, err = s.Query(args...) }\n"
+	t += "    if err != nil { return nil, err }\n"
+	t += "    defer rows.Close()\n"
+	t += "    if !rows.Next() { return nil, nil }\n"
+	t += "    return scanRow(fields, rows)\n"
 	t += "}\n\n"
 
 	t += "func scalarCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (int, error) {\n"
@@ -663,30 +677,30 @@ func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
 			t += "); return &QueryResult{Result: res, Error: err} }\n\n"
 
 		case "one":
-			// core uses queryCore + first element or nil
-			t += "func Query" + nq.Name + buildParams(false, false) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entities, err := queryCore(nil, nil, " + fieldsLit + ", q.Query"
+			// core uses queryOneCore for efficiency
+			t += "func Query" + nq.Name + buildParams(false, false) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entity, err := queryOneCore(nil, nil, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", params.Params..."
 			}
-			t += "); return &QueryResult{Entities: entities, Error: err} }\n"
+			t += "); return &QueryResult{Entity: entity, Error: err, Exists: entity != nil} }\n"
 
-			t += "func Query" + nq.Name + "Ctx" + buildParams(true, false) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entities, err := queryCore(ctx, nil, " + fieldsLit + ", q.Query"
+			t += "func Query" + nq.Name + "Ctx" + buildParams(true, false) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entity, err := queryOneCore(ctx, nil, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", params.Params..."
 			}
-			t += "); return &QueryResult{Entities: entities, Error: err} }\n"
+			t += "); return &QueryResult{Entity: entity, Error: err, Exists: entity != nil} }\n"
 
-			t += "func Query" + nq.Name + "Tx" + buildParams(false, true) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entities, err := queryCore(nil, tx, " + fieldsLit + ", q.Query"
+			t += "func Query" + nq.Name + "Tx" + buildParams(false, true) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entity, err := queryOneCore(nil, tx, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", params.Params..."
 			}
-			t += "); return &QueryResult{Entities: entities, Error: err} }\n"
+			t += "); return &QueryResult{Entity: entity, Error: err, Exists: entity != nil} }\n"
 
-			t += "func Query" + nq.Name + "CtxTx" + buildParams(true, true) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entities, err := queryCore(ctx, tx, " + fieldsLit + ", q.Query"
+			t += "func Query" + nq.Name + "CtxTx" + buildParams(true, true) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entity, err := queryOneCore(ctx, tx, " + fieldsLit + ", q.Query"
 			if hasParams {
 				t += ", params.Params..."
 			}
-			t += "); return &QueryResult{Entities: entities, Error: err} }\n\n"
+			t += "); return &QueryResult{Entity: entity, Error: err, Exists: entity != nil} }\n\n"
 
 		default: // many
 			t += "func Query" + nq.Name + buildParams(false, false) + " *QueryResult { q := queries[\"" + nq.Name + "\"]; entities, err := queryCore(nil, nil, " + fieldsLit + ", q.Query"
