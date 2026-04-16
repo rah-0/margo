@@ -370,7 +370,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 				s += "if ctx != nil { rows, err = stmt.QueryContext(ctx) } else { rows, err = stmt.Query() }\n"
 			}
 			s += "if err != nil { qr.Error = err; return }\n"
-			s += "defer rows.Close()\n\n"
+			s += "defer func() { if cerr := rows.Close(); cerr != nil && qr.Error == nil { qr.Error = cerr } }()\n\n"
 			s += "for rows.Next() {\n"
 			for _, f := range fields {
 				s += "var ptr" + db.NormalizeString(f) + " *string\n"

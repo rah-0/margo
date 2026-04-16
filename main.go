@@ -16,7 +16,11 @@ func main() {
 		nabu.FromError(err).Log()
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			nabu.FromError(err).Log()
+		}
+	}()
 
 	if err = template.PathCreateOutputDir(); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
