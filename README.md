@@ -116,12 +116,16 @@ MarGO can turn SQL queries into type-safe Go functions:
 
 ### Params
 - **Syntax:** `-- Params: uuid_user id ...`
-- **Optional** (documentation only, for now)
-- Placeholders are still `?` and bound by call order.
+- **Optional — purely documentation.** The tag is parsed but is **not consumed by the generator**: removing it from a `.sql` file produces the same generated code. Whether a function accepts a `*QueryParams` argument is decided solely by whether the SQL contains `?` placeholders.
+- Tokens are split by **whitespace only** (any run of spaces/tabs); commas and other punctuation are *not* separators and will become part of the token.
+- The whole tag must be on a single line.
+- Placeholders remain positional `?` and are bound in call order via `QueryParams.WithParams(...)`.
 
 ### Returns
 - **Syntax:** `-- Returns: field_a field_b field_c`
 - **Required** for `many` or `one` modes
+- Tokens are split by **whitespace only** (any run of spaces/tabs) — do **not** comma-separate. For example `-- Returns: field_a, field_b` would be parsed as `["field_a,", "field_b"]` and break code generation.
+- The whole tag must be on a single line.
 - Order defines the struct field order
 - Field names are normalized with `db.NormalizeString`
 - All fields are string (`NULL → ""`).
