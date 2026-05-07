@@ -2,13 +2,14 @@ package conf
 
 import (
 	"flag"
-	"fmt"
 	"os"
+
+	"github.com/rah-0/nabu"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
-func CheckFlags() {
+func CheckFlags() error {
 	dbUser := flag.String("dbUser", "", "Required")
 	dbPassword := flag.String("dbPassword", "", "Required")
 	dbName := flag.String("dbName", "", "Required")
@@ -40,24 +41,22 @@ func CheckFlags() {
 	}
 
 	if len(missing) > 0 {
-		fmt.Fprintln(os.Stderr, "Missing required arguments:")
-		for _, arg := range missing {
-			fmt.Fprintln(os.Stderr, " ", arg)
+		args := make([]any, len(missing))
+		for i, m := range missing {
+			args[i] = m
 		}
 		flag.Usage()
-		return
+		return nabu.FromError(ErrMissingArgs).WithArgs(args...).Log()
 	}
 
 	// Validate queriesPath is a directory if specified
 	if *queriesPath != "" {
 		info, err := os.Stat(*queriesPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: queriesPath '%s' does not exist or is not accessible: %v\n", *queriesPath, err)
-			return
+			return nabu.FromError(ErrQueriesPathInvalid).WithArgs(*queriesPath, err).Log()
 		}
 		if !info.IsDir() {
-			fmt.Fprintf(os.Stderr, "Error: queriesPath '%s' must be a directory, not a file\n", *queriesPath)
-			return
+			return nabu.FromError(ErrQueriesPathNotDir).WithArgs(*queriesPath).Log()
 		}
 	}
 
@@ -68,4 +67,5 @@ func CheckFlags() {
 	Args.DBPort = *dbPort
 	Args.OutputPath = *outputPath
 	Args.QueriesPath = *queriesPath // can be empty
+	return nil
 }

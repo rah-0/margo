@@ -9,7 +9,16 @@ import (
 )
 
 func main() {
-	conf.CheckFlags()
+	nabu.SetFormatter(&nabu.PlainFormatter{
+		Colored:    true,
+		EnableDate: true,
+		EnableArgs: true,
+	})
+
+	if err := conf.CheckFlags(); err != nil {
+		nabu.FromError(err).WithLevelFatal().Log()
+		return
+	}
 
 	conn, err := db.Connect()
 	if err != nil {
@@ -55,7 +64,7 @@ func main() {
 			nabu.FromError(err).WithLevelFatal().Log()
 			return
 		}
-		
+
 		tnqs := []conf.NamedQuery{}
 		for _, nq := range nqs {
 			if nq.MapAs == tn {
