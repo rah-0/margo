@@ -1,12 +1,26 @@
 package template
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestCreateGoFileQueries(t *testing.T) {
-	if _, err := CreateGoFileQueries(tableNames); err != nil {
+	outputPath := setupTemplateTest(t)
+	if err := PathCreateDBDir(); err != nil {
 		t.Fatal(err)
+	}
+
+	tableQueries, err := CreateGoFileQueries(tableNames)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tableQueries) != 0 {
+		t.Fatalf("expected no table queries, got %d", len(tableQueries))
+	}
+	if _, err := os.Stat(filepath.Join(outputPath, "MargoTest", "queries.go")); err != nil {
+		t.Fatalf("stat generated queries file: %v", err)
 	}
 }
 

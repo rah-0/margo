@@ -1,11 +1,4 @@
-![MarGO logo](https://github.com/rah-0/margo-test/blob/master/margo.png "MariaDB's Sea Lion with Golang's Gopher")
-
-[![Go Report Card](https://goreportcard.com/badge/github.com/rah-0/margo?v=1)](https://goreportcard.com/report/github.com/rah-0/margo)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-<a href="https://www.buymeacoffee.com/rah.0" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/arial-orange.png" alt="Buy Me A Coffee" height="50" style="height:50px;">
-</a>
+![MarGO logo](margo.png "MariaDB's Sea Lion with Golang's Gopher")
 
 # MarGO: A Simple, Reflection-free ORM for MariaDB and Go
 
@@ -21,7 +14,7 @@ MarGO (MariaDB + GO) is a code generator that creates type-safe database interac
 - **Direct Table Mapping**: Maps database tables directly to Go structs without complex abstractions
 - **Context Support**: All database operations have context-aware versions
 - **Strongly Typed**: Generated code is type-safe
-- **Near-Raw SQL Performance**: Benchmarks show performance within 99-105% of raw SQL
+- **Reproducible Benchmarks**: Containerized comparisons with raw SQL, Bun, Ent, and GORM
 - **Minimal Dependencies**: Lightweight with few external dependencies
 - **No Nil Pointer Errors**: Safely handles NULL database fields by sanitizing them to empty strings, preventing the common nil pointer errors that could occur
 
@@ -86,6 +79,8 @@ margo -dbUser="your_db_user" \
       -queriesPath="/path/must/be/directory"
 ```
 
+The CLI exits with a non-zero status when argument validation, database access, schema inspection, or code generation fails.
+
 ### CLI Parameters
 
 | Parameter     | Description                                        | Default | Required |
@@ -97,6 +92,45 @@ margo -dbUser="your_db_user" \
 | `-dbPort`     | Database port                                      | 3306    | Yes      |
 | `-outputPath` | Directory where generated files will be saved      | -       | Yes      |
 | `-queriesPath`| Optional path to directory containing .sql files   | -       | No       |
+
+## Tests
+
+Ordinary unit tests are self-contained and do not require Docker or database
+flags:
+
+```bash
+go test ./...
+```
+
+### Integration Tests
+
+The `integration` package owns MarGO's MariaDB integration environment and
+fixtures. With Docker available, one command pulls the pinned MariaDB image,
+creates an isolated database, applies the schema, runs the tests, and removes
+the container:
+
+```bash
+go test -tags=integration -count=1 ./integration
+```
+
+The `integration` build tag keeps Docker out of ordinary unit-test runs. No
+manually managed database, fixed host port, or local credentials are required.
+The suite also runs the current MarGO CLI, generates code into a temporary Go
+module, and executes the generated entity and named-query tests against that
+database. Generated output is not stored in the repository.
+
+### Benchmarks
+
+The `benchmark` package uses the same disposable MariaDB infrastructure while
+remaining separate from correctness tests. It generates the current MarGO
+output and runs the comparison suite in an isolated temporary module:
+
+```bash
+go test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 -v ./benchmark
+```
+
+See [BENCHMARKS.md](BENCHMARKS.md) for the latest measured results, methodology,
+and shorter smoke-run command.
 
 ## Custom SQL Queries
 
@@ -110,7 +144,7 @@ MarGO can turn SQL queries into type-safe Go functions:
   - `many`/`one` modes → `Query<Name>(...)` (e.g., `GetUserById.sql` → `QueryGetUserById`)
   - `exec` mode → `Exec<Name>(...)` (e.g., `DeleteOldRecords.sql` → `ExecDeleteOldRecords`)
 - No `SELECT *` queries are allowed, you must explicitly specify columns
-- See [example queries directory](https://github.com/rah-0/margo/tree/master/doc/sql/queries) for reference
+- See the [integration query fixtures](integration/testdata/queries) for examples
 
 ## Supported Tags (SQL Generator)
 
@@ -305,15 +339,17 @@ Prepared statements are cached per query string and reused across transactions v
 
 ## Generated Code
 
-You can see examples of generated code in the [margo-test repository](https://github.com/rah-0/margo-test/tree/master/dbs/Template).
-
-For examples of how to use the generated code, see these test files:
-- [Entity usage examples](https://github.com/rah-0/margo-test/blob/master/dbs/Template/Alpha/entity_test.go)
-- [Custom queries usage examples](https://github.com/rah-0/margo-test/blob/master/dbs/Template/queries_test.go)
+Generated code is exercised without committing a stale snapshot: the
+integration suite generates it into a temporary module and overlays the
+[generated-code runtime test fixture](integration/testdata/generated_runtime_test.go).
+That suite contains entity CRUD, all-types round-trip, and custom-query usage
+examples.
 
 ## Performance
 
-See the detailed benchmark results in the [BENCHMARKS.md](https://github.com/rah-0/margo-test/blob/master/BENCHMARKS.md) file in the margo-test repository.
+See [BENCHMARKS.md](BENCHMARKS.md) for the reproducible benchmark suite. Compare
+implementations within the same run because database benchmarks are sensitive
+to the host, container runtime, and system load.
 
 ---
 

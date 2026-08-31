@@ -1,3 +1,4 @@
+-- Generation-only fixture: its referenced tables are outside this test schema.
 -- Params: user_id
 -- Returns: total_storage_used reached_file_limit exceeded_storage_limit
 -- ResultMode: one

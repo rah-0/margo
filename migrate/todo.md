@@ -27,13 +27,11 @@ migrate/
   store.go           // CRUD on the metadata table
   runner.go          // Migrate / Up / Down / Validate / Status orchestration
   baseline.go        // Baseline (adoption: stamp rows applied without executing SQL)
-  main_test.go       // testmark TestMainWrapper (DB connection)
   parse_test.go
   discover_test.go
   hash_test.go
-  store_test.go
-  runner_test.go
-  baseline_test.go
+integration/
+  migrate_test.go    // tagged Testcontainers coverage for store/runner/baseline
 ```
 
 Errors are wrapped with `nabu.FromError(err).WithArgs(...).Log()`, identical to the rest of the codebase.
@@ -411,9 +409,13 @@ Applied by an internal `applyDefaults(*Options)` at the top of every public func
   - Trailing whitespace and comments are part of the hash (changing them changes the hash).
   - Identical files → identical hashes.
 
-### Integration (requires DB; gated by the existing `testmark` setup)
+### Integration (requires Docker; gated by the `integration` build tag)
 
-`migrate/main_test.go` mirrors `db/main_test.go`, opening a connection via `db.Connect()` against the test database. The neighbouring `margo-test` repo (sibling to this one under `github/`) already exercises generated code against a real MariaDB; integration tests for `migrate` slot in alongside it via a `go.work` file at the `github/` root linking `margo`, `margo-test`, `nabu`, and `testmark`. Each test uses `t.TempDir()` for migration files and a unique `TableName` to avoid cross-test pollution.
+Migration integration tests should use the repository's disposable MariaDB
+harness and run with the rest of the `integration` package. No external test
+checkout, `go.work` file, fixed port, or manually managed database is required.
+Each test uses `t.TempDir()` for migration files and a unique `TableName` to
+avoid cross-test pollution.
 
 - Metadata table is created on first run; second run is a no-op.
 - `Up` applies all migrations and rows reflect `status='applied'` with monotonic versions.

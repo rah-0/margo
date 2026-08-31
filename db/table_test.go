@@ -1,18 +1,6 @@
 package db
 
-import (
-	"testing"
-)
-
-func TestGetDbTables(t *testing.T) {
-	tables, err := GetDbTables(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tables) == 0 {
-		t.Fatal("Expected some tables")
-	}
-}
+import "testing"
 
 func TestNormalizeString(t *testing.T) {
 	tests := []struct {
@@ -67,23 +55,6 @@ func TestNormalizeString(t *testing.T) {
 		result := NormalizeString(tt.input)
 		if result != tt.expected {
 			t.Errorf("NormalizeString(%q) = %q; want %q", tt.input, result, tt.expected)
-		}
-	}
-}
-
-func TestGetDbTableFields(t *testing.T) {
-	tables, err := GetDbTables(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tables) == 0 {
-		t.Fatal("Expected some tables")
-	}
-
-	for _, table := range tables {
-		_, err := GetDbTableFields(conn, table)
-		if err != nil {
-			t.Fatal(err)
 		}
 	}
 }

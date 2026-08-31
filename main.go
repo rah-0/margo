@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/rah-0/nabu"
 
 	"github.com/rah-0/margo/conf"
@@ -15,15 +17,21 @@ func main() {
 		EnableArgs: true,
 	})
 
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	if err := conf.CheckFlags(); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
-		return
+		return err
 	}
 
 	conn, err := db.Connect()
 	if err != nil {
 		nabu.FromError(err).Log()
-		return
+		return err
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
@@ -33,36 +41,36 @@ func main() {
 
 	if err = template.PathCreateOutputDir(); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
-		return
+		return err
 	}
 
 	if err = template.PathCreateDBDir(); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
-		return
+		return err
 	}
 
 	tableNames, err := db.GetDbTables(conn)
 	if err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
-		return
+		return err
 	}
 
 	if err = template.PathCreateTableDirs(tableNames); err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
-		return
+		return err
 	}
 
 	nqs, err := template.CreateGoFileQueries(tableNames)
 	if err != nil {
 		nabu.FromError(err).WithLevelFatal().Log()
-		return
+		return err
 	}
 
 	for _, tn := range tableNames {
 		tfs, err := db.GetDbTableFields(conn, tn)
 		if err != nil {
 			nabu.FromError(err).WithLevelFatal().Log()
-			return
+			return err
 		}
 
 		tnqs := []conf.NamedQuery{}
@@ -74,7 +82,9 @@ func main() {
 
 		if err := template.CreateGoFileEntity(tn, tfs, tnqs); err != nil {
 			nabu.FromError(err).WithLevelFatal().Log()
-			return
+			return err
 		}
 	}
+
+	return nil
 }

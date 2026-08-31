@@ -61,4 +61,4 @@ CREATE TABLE `beta` (
   `uuid` uuid NOT NULL DEFAULT uuid_v4(),
   `name` varchar(191) NOT NULL DEFAULT '',
   PRIMARY KEY (`uuid`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci:
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
