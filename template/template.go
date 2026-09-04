@@ -245,7 +245,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "	return placeholders\n"
 	t += "}\n\n"
 
-	t += "func getPreparedStmt(query string) (*sql.Stmt, error) {\n"
+	t += "func getPreparedStmt(ctx context.Context, query string) (*sql.Stmt, error) {\n"
 	t += "	stmtMu.RLock()\n"
 	t += "	if stmt, ok := stmtCache[query]; ok {\n"
 	t += "		stmtMu.RUnlock()\n"
@@ -257,7 +257,10 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "	if stmt, ok := stmtCache[query]; ok {\n"
 	t += "		return stmt, nil\n"
 	t += "	}\n"
-	t += "	stmt, err := db.Prepare(query)\n"
+	t += "	if ctx == nil {\n"
+	t += "		ctx = context.Background()\n"
+	t += "	}\n"
+	t += "	stmt, err := db.PrepareContext(ctx, query)\n"
 	t += "	if err != nil {\n"
 	t += "		return nil, err\n"
 	t += "	}\n"
@@ -320,7 +323,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "}\n\n"
 
 	t += "func execCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (res sql.Result, err error) {\n"
-	t += "	stmt, err := getPreparedStmt(query)\n"
+	t += "	stmt, err := getPreparedStmt(ctx, query)\n"
 	t += "	if err != nil { return nil, err }\n"
 	t += "	s, needClose := bindStmtCtxTx(stmt, ctx, tx)\n"
 	t += "	if needClose { defer func(){ if cerr := s.Close(); err == nil && cerr != nil { err = cerr } }() }\n"
@@ -329,7 +332,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "}\n\n"
 
 	t += "func queryCore(ctx context.Context, tx *sql.Tx, fields []string, query string, args ...any) (out []*Entity, err error) {\n"
-	t += "    stmt, err := getPreparedStmt(query)\n"
+	t += "    stmt, err := getPreparedStmt(ctx, query)\n"
 	t += "    if err != nil { return nil, err }\n"
 	t += "    s, needClose := bindStmtCtxTx(stmt, ctx, tx)\n"
 	t += "    if needClose { defer func(){ if cerr := s.Close(); err == nil && cerr != nil { err = cerr } }() }\n"
@@ -340,7 +343,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "}\n\n"
 
 	t += "func queryOneCore(ctx context.Context, tx *sql.Tx, fields []string, query string, args ...any) (_ *Entity, err error) {\n"
-	t += "    stmt, err := getPreparedStmt(query)\n"
+	t += "    stmt, err := getPreparedStmt(ctx, query)\n"
 	t += "    if err != nil { return nil, err }\n"
 	t += "    s, needClose := bindStmtCtxTx(stmt, ctx, tx)\n"
 	t += "    if needClose { defer func(){ if cerr := s.Close(); err == nil && cerr != nil { err = cerr } }() }\n"
@@ -360,7 +363,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "}\n\n"
 
 	t += "func scalarCore(ctx context.Context, tx *sql.Tx, query string, args ...any) (_ int, err error) {\n"
-	t += "	stmt, err := getPreparedStmt(query)\n"
+	t += "	stmt, err := getPreparedStmt(ctx, query)\n"
 	t += "	if err != nil { return 0, err }\n"
 	t += "	s, needClose := bindStmtCtxTx(stmt, ctx, tx)\n"
 	t += "	if needClose { defer func(){ if cerr := s.Close(); err == nil && cerr != nil { err = cerr } }() }\n"

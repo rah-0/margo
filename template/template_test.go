@@ -24,4 +24,8 @@ func TestCreateGoFileEntity(t *testing.T) {
 	if !strings.Contains(string(content), "package Alpha") {
 		t.Fatalf("generated entity has unexpected package:\n%s", content)
 	}
+	assertContextAwareStatementPreparation(t, content)
+	if count := strings.Count(string(content), "getPreparedStmt(ctx, query)"); count != 4 {
+		t.Errorf("expected four context-aware statement preparation calls, got %d", count)
+	}
 }

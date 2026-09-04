@@ -3,7 +3,10 @@ package template
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/rah-0/margo/conf"
 )
 
 func TestCreateGoFileQueries(t *testing.T) {
@@ -19,8 +22,44 @@ func TestCreateGoFileQueries(t *testing.T) {
 	if len(tableQueries) != 0 {
 		t.Fatalf("expected no table queries, got %d", len(tableQueries))
 	}
-	if _, err := os.Stat(filepath.Join(outputPath, "MargoTest", "queries.go")); err != nil {
-		t.Fatalf("stat generated queries file: %v", err)
+	content, err := os.ReadFile(filepath.Join(outputPath, "MargoTest", "queries.go"))
+	if err != nil {
+		t.Fatalf("read generated queries file: %v", err)
+	}
+	assertContextAwareStatementPreparation(t, content)
+}
+
+func TestCreateGoFileQueriesPassesContextToNamedQueries(t *testing.T) {
+	outputPath := setupTemplateTest(t)
+	if err := PathCreateDBDir(); err != nil {
+		t.Fatal(err)
+	}
+	queriesPath := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(queriesPath, "FindAlpha.sql"),
+		[]byte("-- Returns: uuid\n-- ResultMode: one\nSELECT uuid FROM alpha WHERE uuid = ?\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write named query: %v", err)
+	}
+	args := conf.Args
+	args.QueriesPath = queriesPath
+	conf.Args = args
+
+	tableQueries, err := CreateGoFileQueries(tableNames)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tableQueries) != 0 {
+		t.Fatalf("expected no table queries, got %d", len(tableQueries))
+	}
+	content, err := os.ReadFile(filepath.Join(outputPath, "MargoTest", "queries.go"))
+	if err != nil {
+		t.Fatalf("read generated queries file: %v", err)
+	}
+	assertContextAwareStatementPreparation(t, content)
+	if !strings.Contains(string(content), "base, err := getPreparedStmt(ctx, q.Query)") {
+		t.Error("generated named query does not pass its context to statement preparation")
 	}
 }
 
