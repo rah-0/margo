@@ -1,10 +1,9 @@
 package template
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
-
-	"github.com/rah-0/nabu"
 
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
@@ -15,7 +14,7 @@ func CreateGoFileEntity(rawTableName string, tfs []conf.TableField, nqs []conf.N
 	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), db.NormalizeString(rawTableName), "entity.go")
 	c, err := GetFileContentEntity(rawTableName, tfs, nqs)
 	if err != nil {
-		return nabu.FromError(err).WithArgs(rawTableName).Log()
+		return fmt.Errorf("generate entity for table %q: %w", rawTableName, err)
 	}
 
 	return util.WriteGoFile(p, c)
@@ -550,8 +549,6 @@ func GetDBFunctions() string {
 	t += "	return &QueryResult{Entities: entities, Error: err}\n"
 	t += "}\n\n"
 
-
-
 	//Exists - flexible: Select controls returned fields, Where controls filter
 	t += "func (x *Entity) DBExists(params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil {\n"
@@ -613,8 +610,6 @@ func GetDBFunctions() string {
 	t += "	*x = *entities[0]\n"
 	t += "	return &QueryResult{Exists: true}\n"
 	t += "}\n\n"
-
-
 
 	return t
 }

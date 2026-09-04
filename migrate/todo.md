@@ -34,7 +34,7 @@ integration/
   migrate_test.go    // tagged Testcontainers coverage for store/runner/baseline
 ```
 
-Errors are wrapped with `nabu.FromError(err).WithArgs(...).Log()`, identical to the rest of the codebase.
+Errors wrap their causes with `%w` and add operation context. The CLI logs the final error once at its boundary.
 
 ## 3. Public API
 
@@ -219,7 +219,7 @@ The runner is one pipeline shared by `Migrate`, `Up`, `Down`, and (in read-only 
 6. **Pre-flight (read-only cross-check).** Runs against the in-memory filesystem list and DB map; never executes migration SQL:
    - Status `running` or `failed` for any row → `ErrDirtyState`. Operator must clear manually.
    - For each row with status `applied` or `rolled_back`:
-     - File missing on disk → `ErrMissingFile` if `Strict`; otherwise `nabu`-log and continue.
+     - File missing on disk → `ErrMissingFile` if `Strict`; otherwise allow it by explicit opt-in and continue.
      - `up_hash` differs from disk → `ErrHashMismatch`.
      - Disk has a down file and stored `down_hash` differs → `ErrHashMismatch`.
      - Stored `down_hash IS NULL` but disk now has a down file → `ErrHashMismatch` (history rewritten).
@@ -347,7 +347,7 @@ What `Baseline` deliberately does **not** do:
 
 ## 12. Errors (`errors.go`)
 
-Sentinel errors so callers and tests can use `errors.Is`. All paths through the runner wrap these with `nabu.FromError(err).WithArgs(version, name, ...).Log()` for context.
+Sentinel errors let callers and tests use `errors.Is`. Runner paths wrap them with `%w` and add migration context; logging remains at the CLI boundary.
 
 ```go
 var (

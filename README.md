@@ -79,7 +79,7 @@ margo -dbUser="your_db_user" \
       -queriesPath="/path/must/be/directory"
 ```
 
-The CLI exits with a non-zero status when argument validation, database access, schema inspection, or code generation fails.
+The CLI writes plain-text completion and terminal-error logs to stderr. It exits with a non-zero status when argument validation, database access, schema inspection, code generation, or database cleanup fails.
 
 ### CLI Parameters
 

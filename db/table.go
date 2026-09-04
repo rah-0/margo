@@ -2,10 +2,10 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"github.com/fatih/camelcase"
-	"github.com/rah-0/nabu"
 
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/util"
@@ -23,13 +23,13 @@ func GetDbTables(c *sql.DB) ([]string, error) {
 		conf.Args.DBName,
 	)
 	if err != nil {
-		return tables, nabu.FromError(err).Log()
+		return tables, fmt.Errorf("query database tables: %w", err)
 	}
 
 	for rows.Next() {
 		var tableName string
 		if err = rows.Scan(&tableName); err != nil {
-			return tables, nabu.FromError(err).Log()
+			return tables, fmt.Errorf("scan database table name: %w", err)
 		}
 		tables = append(tables, tableName)
 	}
@@ -81,7 +81,7 @@ func GetDbTableFields(c *sql.DB, tableName string) ([]conf.TableField, error) {
 			ORDINAL_POSITION
 	`)
 	if err != nil {
-		return tfs, nabu.FromError(err).Log()
+		return tfs, fmt.Errorf("query fields for table %q: %w", tableName, err)
 	}
 
 	for rows.Next() {
@@ -90,7 +90,7 @@ func GetDbTableFields(c *sql.DB, tableName string) ([]conf.TableField, error) {
 		var columnType string
 
 		if err = rows.Scan(&columnName, &dataType, &columnType); err != nil {
-			return tfs, nabu.FromError(err).Log()
+			return tfs, fmt.Errorf("scan fields for table %q: %w", tableName, err)
 		}
 
 		tfs = append(tfs, conf.TableField{

@@ -2,12 +2,10 @@ package template
 
 import (
 	"encoding/base64"
-	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"github.com/rah-0/nabu"
 
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
@@ -19,28 +17,30 @@ var selectStarRegex = regexp.MustCompile(`(?i)select\s*\*`)
 func CreateGoFileQueries(tns []string) ([]conf.NamedQuery, error) {
 	pathModuleOutput, err := util.GetGoModuleImportPath(conf.Args.OutputPath)
 	if err != nil {
-		return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.OutputPath).Log()
+		return []conf.NamedQuery{}, fmt.Errorf("resolve output module %q: %w", conf.Args.OutputPath, err)
 	}
 	pathModuleOutput = filepath.Join(pathModuleOutput, db.NormalizeString(conf.Args.DBName))
 
-	nqsGeneral := []conf.NamedQuery{}
-	nqsTableSpecific := []conf.NamedQuery{}
+	var (
+		nqsGeneral       []conf.NamedQuery
+		nqsTableSpecific []conf.NamedQuery
+	)
 
 	// Only process queries if a queries path is provided
 	if conf.Args.QueriesPath != "" {
 		// Read all .sql files from directory
 		sqlFiles, err := util.GetSQLFilesInDir(conf.Args.QueriesPath)
 		if err != nil {
-			return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(conf.Args.QueriesPath).Log()
+			return []conf.NamedQuery{}, fmt.Errorf("read queries directory %q: %w", conf.Args.QueriesPath, err)
 		}
 
 		for _, sqlFile := range sqlFiles {
 			content, err := util.ReadFileAsString(sqlFile)
 			if err != nil {
-				return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(sqlFile).Log()
+				return []conf.NamedQuery{}, fmt.Errorf("read query file %q: %w", sqlFile, err)
 			}
 			if err = CheckNoSelectStar([]string{content}); err != nil {
-				return []conf.NamedQuery{}, nabu.FromError(err).WithArgs(sqlFile).Log()
+				return []conf.NamedQuery{}, fmt.Errorf("validate query file %q: %w", sqlFile, err)
 			}
 
 			// Extract query name from filename (without .sql extension)
@@ -258,7 +258,7 @@ func CheckNoSelectStar(queries []string) error {
 	for i, q := range queries {
 		normalized := strings.Join(strings.Fields(q), " ")
 		if selectStarRegex.MatchString(normalized) {
-			return nabu.FromError(errors.New("SELECT * is not allowed")).WithArgs(i, q).Log()
+			return fmt.Errorf("SELECT * is not allowed in query %d", i)
 		}
 	}
 	return nil

@@ -2,10 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"runtime"
 	"time"
-
-	"github.com/rah-0/nabu"
 
 	"github.com/rah-0/margo/conf"
 )
@@ -13,7 +12,7 @@ import (
 func Connect() (*sql.DB, error) {
 	conn, err := sql.Open("mysql", conf.Args.DBUser+":"+conf.Args.DBPassword+"@tcp("+conf.Args.DBIp+":"+conf.Args.DBPort+")/"+conf.Args.DBName)
 	if err != nil {
-		return nil, nabu.FromError(err).Log()
+		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	conn.SetMaxIdleConns(runtime.NumCPU())
@@ -21,7 +20,7 @@ func Connect() (*sql.DB, error) {
 	conn.SetConnMaxIdleTime(time.Minute * 1)
 
 	if err = conn.Ping(); err != nil {
-		return nil, nabu.FromError(err).Log()
+		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
 	return conn, nil

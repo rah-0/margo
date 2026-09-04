@@ -2,9 +2,9 @@ package conf
 
 import (
 	"flag"
+	"fmt"
 	"os"
-
-	"github.com/rah-0/nabu"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -41,22 +41,18 @@ func CheckFlags() error {
 	}
 
 	if len(missing) > 0 {
-		args := make([]any, len(missing))
-		for i, m := range missing {
-			args[i] = m
-		}
 		flag.Usage()
-		return nabu.FromError(ErrMissingArgs).WithArgs(args...).Log()
+		return fmt.Errorf("%w: %s", ErrMissingArgs, strings.Join(missing, ", "))
 	}
 
 	// Validate queriesPath is a directory if specified
 	if *queriesPath != "" {
 		info, err := os.Stat(*queriesPath)
 		if err != nil {
-			return nabu.FromError(ErrQueriesPathInvalid).WithArgs(*queriesPath, err).Log()
+			return fmt.Errorf("%w: %q: %w", ErrQueriesPathInvalid, *queriesPath, err)
 		}
 		if !info.IsDir() {
-			return nabu.FromError(ErrQueriesPathNotDir).WithArgs(*queriesPath).Log()
+			return fmt.Errorf("%w: %q", ErrQueriesPathNotDir, *queriesPath)
 		}
 	}
 

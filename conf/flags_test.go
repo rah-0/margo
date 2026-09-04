@@ -4,16 +4,11 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/rah-0/nabu"
 )
-
-func init() {
-	nabu.SetLogOutput(nabu.OutputInternal)
-}
 
 func resetFlags(t *testing.T) {
 	t.Helper()
@@ -51,8 +46,12 @@ func TestCheckFlagsMissingArgs(t *testing.T) {
 func TestCheckFlagsQueriesPathInvalid(t *testing.T) {
 	resetFlags(t)
 	os.Args = validArgs("-queriesPath", filepath.Join(t.TempDir(), "does-not-exist"))
-	if err := CheckFlags(); !errors.Is(err, ErrQueriesPathInvalid) {
+	err := CheckFlags()
+	if !errors.Is(err, ErrQueriesPathInvalid) {
 		t.Fatalf("expected ErrQueriesPathInvalid, got %v", err)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("expected fs.ErrNotExist, got %v", err)
 	}
 }
 

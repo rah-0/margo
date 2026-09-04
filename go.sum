@@ -88,8 +88,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 h1:o4JXh1EVt9k/+g42oCprj/FisM4qX9L3sZB3upGN2ZU=
 github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55/go.mod h1:OmDBASR4679mdNQnz2pUhc2G8CO2JrUAVFDRBDP/hJE=
-github.com/rah-0/nabu v1.2.0 h1:dvvttM37DMLKjbXfq63ellRw9oqucQ+VqYOU2j0Xo30=
-github.com/rah-0/nabu v1.2.0/go.mod h1:S5Oja6zD2RBnNRyMUQzRasg+9CRH1kI/CdP00MBPwcQ=
+github.com/rah-0/slogx v0.2.0 h1:wC1f2eRvYNZ0OB96IuHEcOQZ3QfoRmOiSsx1CL5QxyI=
+github.com/rah-0/slogx v0.2.0/go.mod h1:3UrQxhNEuEuDIYeoZCN8HwJ3AXFvv67k8jNHw1yDmnk=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/shirou/gopsutil/v4 v4.26.6 h1:Mzr/npDtQC/xpeEuQKHZt8Zo9CmPvhTj8nkR8w5TLDs=

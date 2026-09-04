@@ -1,20 +1,18 @@
 package util
 
 import (
-	"errors"
+	"fmt"
 	"go/format"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/rah-0/nabu"
 )
 
 func EnsureDir(path string) error {
 	// MkdirAll does nothing if the path already exists as a dir
 	if err := os.MkdirAll(path, 0755); err != nil {
-		return nabu.FromError(err).WithArgs(path).Log()
+		return fmt.Errorf("create directory %q: %w", path, err)
 	}
 	return nil
 }
@@ -22,11 +20,11 @@ func EnsureDir(path string) error {
 func WriteGoFile(path string, content string) error {
 	formatted, err := format.Source([]byte(content))
 	if err != nil {
-		return nabu.FromError(err).WithArgs(path).Log()
+		return fmt.Errorf("format Go file %q: %w", path, err)
 	}
 	err = os.WriteFile(path, formatted, 0644)
 	if err != nil {
-		return nabu.FromError(err).Log()
+		return fmt.Errorf("write Go file %q: %w", path, err)
 	}
 	return nil
 }
@@ -48,7 +46,7 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 			// Read go.mod and extract module path
 			data, err := os.ReadFile(goModPath)
 			if err != nil {
-				return "", nabu.FromError(err).WithArgs(curr).Log()
+				return "", fmt.Errorf("read %q: %w", goModPath, err)
 			}
 			var modulePath string
 			for _, line := range strings.Split(string(data), "\n") {
@@ -58,11 +56,11 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 				}
 			}
 			if modulePath == "" {
-				return "", nabu.FromError(errors.New("go.mod found but no module line")).Log()
+				return "", fmt.Errorf("%s: no module directive", goModPath)
 			}
 			relPath, err := filepath.Rel(curr, outputPath)
 			if err != nil {
-				return "", nabu.FromError(err).WithArgs(outputPath).Log()
+				return "", fmt.Errorf("resolve output path %q relative to %q: %w", outputPath, curr, err)
 			}
 			importPath := path.Join(modulePath, filepath.ToSlash(relPath))
 			return importPath, nil
@@ -75,7 +73,7 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 		curr = parent
 	}
 
-	return "", nabu.FromError(errors.New("go.mod not found in any parent")).WithArgs(outputPath).Log()
+	return "", fmt.Errorf("go.mod not found in any parent of %q", outputPath)
 }
 
 // GetSQLFilesInDir returns all .sql file paths in the given directory.
@@ -83,7 +81,7 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 func GetSQLFilesInDir(dirPath string) ([]string, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
-		return nil, nabu.FromError(err).WithArgs(dirPath).Log()
+		return nil, fmt.Errorf("read SQL directory %q: %w", dirPath, err)
 	}
 
 	var sqlFiles []string
