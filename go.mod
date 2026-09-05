@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/fatih/camelcase v1.0.0
-	github.com/go-sql-driver/mysql v1.10.0
+	github.com/go-sql-driver/mysql v1.10.1
 	github.com/rah-0/slogx v0.2.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/mariadb v0.44.0
