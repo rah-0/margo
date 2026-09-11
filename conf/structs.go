@@ -1,13 +1,14 @@
 package conf
 
 type Arguments struct {
-	DBUser      string
-	DBPassword  string
-	DBName      string
-	DBIp        string
-	DBPort      string
-	OutputPath  string
-	QueriesPath string
+	DBUser         string
+	DBPassword     string
+	DBName         string
+	DBIp           string
+	DBPort         string
+	OutputPath     string
+	QueriesPath    string
+	MigrationsPath string
 }
 
 type TableField struct {

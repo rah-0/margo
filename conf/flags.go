@@ -10,58 +10,70 @@ import (
 )
 
 func CheckFlags() error {
-	dbUser := flag.String("dbUser", "", "Required")
-	dbPassword := flag.String("dbPassword", "", "Required")
-	dbName := flag.String("dbName", "", "Required")
-	dbIp := flag.String("dbIp", "", "Required")
-	dbPort := flag.String("dbPort", "3306", "Required")
-	outputPath := flag.String("outputPath", "", "Required: path where .go files will be created.")
-	queriesPath := flag.String("queriesPath", "", "Optional: path to directory containing .sql query files.")
+	var args Arguments
+	flag.StringVar(&args.DBUser, "dbUser", "", "Required")
+	flag.StringVar(&args.DBPassword, "dbPassword", "", "Required")
+	flag.StringVar(&args.DBName, "dbName", "", "Required")
+	flag.StringVar(&args.DBIp, "dbIp", "", "Required")
+	flag.StringVar(&args.DBPort, "dbPort", "3306", "Required")
+	flag.StringVar(&args.OutputPath, "outputPath", "", "Optional: path where .go files will be created; omit to skip code generation.")
+	flag.StringVar(&args.QueriesPath, "queriesPath", "", "Optional: path to directory containing .sql query files.")
+	flag.StringVar(&args.MigrationsPath, "migrationsPath", "", "Optional: path to numbered SQL migrations applied before code generation.")
 	flag.Parse()
 
-	var missing []string
+	if args.OutputPath == "" && args.QueriesPath == "" && args.MigrationsPath == "" {
+		Args = args
+		return nil
+	}
+	if args.QueriesPath != "" && args.OutputPath == "" {
+		return fmt.Errorf("%w: -outputPath is required when -queriesPath is set", ErrMissingArgs)
+	}
 
-	if *dbUser == "" {
+	var missing []string
+	if args.DBUser == "" {
 		missing = append(missing, "-dbUser")
 	}
-	if *dbPassword == "" {
+	if args.DBPassword == "" {
 		missing = append(missing, "-dbPassword")
 	}
-	if *dbName == "" {
+	if args.DBName == "" {
 		missing = append(missing, "-dbName")
 	}
-	if *dbIp == "" {
+	if args.DBIp == "" {
 		missing = append(missing, "-dbIp")
 	}
-	if *dbPort == "" {
+	if args.DBPort == "" {
 		missing = append(missing, "-dbPort")
 	}
-	if *outputPath == "" {
-		missing = append(missing, "-outputPath")
-	}
-
 	if len(missing) > 0 {
 		flag.Usage()
 		return fmt.Errorf("%w: %s", ErrMissingArgs, strings.Join(missing, ", "))
 	}
 
-	// Validate queriesPath is a directory if specified
-	if *queriesPath != "" {
-		info, err := os.Stat(*queriesPath)
+	if args.OutputPath != "" {
+		if err := validateOutputPath(args.OutputPath); err != nil {
+			return err
+		}
+	}
+	if args.QueriesPath != "" {
+		info, err := os.Stat(args.QueriesPath)
 		if err != nil {
-			return fmt.Errorf("%w: %q: %w", ErrQueriesPathInvalid, *queriesPath, err)
+			return fmt.Errorf("%w: %q: %w", ErrQueriesPathInvalid, args.QueriesPath, err)
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("%w: %q", ErrQueriesPathNotDir, *queriesPath)
+			return fmt.Errorf("%w: %q", ErrQueriesPathNotDir, args.QueriesPath)
+		}
+	}
+	if args.MigrationsPath != "" {
+		info, err := os.Stat(args.MigrationsPath)
+		if err != nil {
+			return fmt.Errorf("%w: %q: %w", ErrMigrationsPathInvalid, args.MigrationsPath, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%w: %q", ErrMigrationsPathNotDir, args.MigrationsPath)
 		}
 	}
 
-	Args.DBUser = *dbUser
-	Args.DBPassword = *dbPassword
-	Args.DBName = *dbName
-	Args.DBIp = *dbIp
-	Args.DBPort = *dbPort
-	Args.OutputPath = *outputPath
-	Args.QueriesPath = *queriesPath // can be empty
+	Args = args
 	return nil
 }

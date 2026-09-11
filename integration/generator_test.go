@@ -46,7 +46,7 @@ require github.com/go-sql-driver/mysql v1.10.0
 		t,
 		workspace,
 		append(os.Environ(), "GOWORK=off", "MARGO_INTEGRATION_DSN="+database.DSN),
-		"go", "test", "-mod=mod", "-tags=margo_generated_runtime", "-count=1", "-p=1", "./...",
+		"go", "test", "-mod=mod", "-tags=margo_generated_runtime", "-count=1", "-race", "-cover", "-covermode=atomic", "-p=1", "./...",
 	)
 }
 

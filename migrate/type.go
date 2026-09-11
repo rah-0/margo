@@ -1,10 +1,4 @@
 package migrate
 
-type State string
-
-const (
-	StateRunning    State = "running"
-	StateApplied    State = "applied"
-	StateFailed     State = "failed"
-	StateRolledBack State = "rolled_back"
-)
+// TableName is the reserved table name for the migration version.
+const TableName = "margo_schema_version"
