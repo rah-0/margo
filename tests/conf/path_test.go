@@ -11,6 +11,11 @@ import (
 	"github.com/rah-0/margo/errs"
 )
 
+type outputSymlinkCase struct {
+	path    string
+	invalid bool
+}
+
 func TestValidatePathsWithoutPaths(t *testing.T) {
 	t.Parallel()
 	if err := conf.ValidatePaths("", "", ""); err != nil {
@@ -127,10 +132,7 @@ func TestValidatePathsOutputSymlinks(t *testing.T) {
 	if err := os.Symlink(t.TempDir(), valid); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		path    string
-		invalid bool
-	}{
+	for _, tc := range []outputSymlinkCase{
 		{path: broken, invalid: true},
 		{path: filepath.Join(broken, "generated"), invalid: true},
 		{path: valid},

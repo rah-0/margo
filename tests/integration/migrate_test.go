@@ -18,6 +18,33 @@ import (
 	"github.com/rah-0/margo/migrate"
 )
 
+type migrationDone struct{}
+
+type migrationGapCase struct {
+	name    string
+	current uint64
+	pending []uint64
+}
+
+type migrationConnectionRequirementCase struct {
+	name            string
+	multiStatements bool
+	selected        bool
+	want            error
+}
+
+type migrationInitialSessionCase struct {
+	name  string
+	setup string
+}
+
+type migrationSessionBoundaryCase struct {
+	name       string
+	statement  string
+	mysqlCode  uint16
+	createsDDL bool
+}
+
 func TestMigrations(t *testing.T) {
 	server := StartMariaDB(t)
 	database := migrationPool(t, server.DSN, true, true)
@@ -83,11 +110,7 @@ DROP PROCEDURE migration_insert;
 	})
 
 	t.Run("gaps reject the complete pending batch", func(t *testing.T) {
-		for _, tc := range []struct {
-			name    string
-			current uint64
-			pending []uint64
-		}{
+		for _, tc := range []migrationGapCase{
 			{name: "missing first", pending: []uint64{2}},
 			{name: "missing intermediate", pending: []uint64{1, 3}},
 			{name: "gap after stored version", current: 4, pending: []uint64{5, 7}},
@@ -102,7 +125,7 @@ DROP PROCEDURE migration_insert;
 				for _, version := range tc.pending {
 					writeMigration(t, path, fmt.Sprintf("%04d_items.sql", version), "CREATE TABLE migration_items (id INT PRIMARY KEY);")
 				}
-				err := migrate.Run(t.Context(), migrate.Options{DB: database, Path: path})
+				err := migrate.Run(t.Context(), migrate.Options{DB: database, FS: os.DirFS(path)})
 				if !errors.Is(err, errs.ErrVersionGap) {
 					t.Fatalf("expected version-gap error, got %v", err)
 				}
@@ -121,7 +144,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 `
 		writeMigration(t, path, "0001_items.sql", retrySafeSQL+"INSERT INTO migration_missing_table VALUES (1);")
 		writeMigration(t, path, "0002_next.sql", "CREATE TABLE migration_next (id INT PRIMARY KEY);")
-		err := migrate.Run(t.Context(), migrate.Options{DB: database, Path: path})
+		err := migrate.Run(t.Context(), migrate.Options{DB: database, FS: os.DirFS(path)})
 		assertMigrationFailure(t, err, "0001_items.sql", 1146)
 		assertMigrationVersion(t, database, 0)
 		assertMigrationCount(t, database, "migration_items", 1)
@@ -148,7 +171,7 @@ CREATE TABLE IF NOT EXISTS migration_items (id INT PRIMARY KEY);
 INSERT IGNORE INTO migration_items VALUES (1);
 `)
 		writeMigration(t, path, "0002_next.sql", "CREATE TABLE migration_next (id INT PRIMARY KEY);")
-		err := migrate.Run(t.Context(), migrate.Options{DB: database, Path: path})
+		err := migrate.Run(t.Context(), migrate.Options{DB: database, FS: os.DirFS(path)})
 		assertMigrationFailure(t, err, "0001_items.sql", 1644)
 		assertMigrationVersion(t, database, 0)
 		assertMigrationCount(t, database, "migration_items", 1)
@@ -166,7 +189,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 		path := t.TempDir()
 		writeMigration(t, path, "0001_checkpoint.sql", "DELETE FROM "+migrate.TableName+" WHERE id = 1;")
 		writeMigration(t, path, "0002_next.sql", "CREATE TABLE migration_next (id INT PRIMARY KEY);")
-		err := migrate.Run(t.Context(), migrate.Options{DB: database, Path: path})
+		err := migrate.Run(t.Context(), migrate.Options{DB: database, FS: os.DirFS(path)})
 		if !errors.Is(err, errs.ErrMigrationFailed) || !errors.Is(err, errs.ErrVersionUpdateFailed) || !strings.Contains(err.Error(), "0001_checkpoint.sql") {
 			t.Fatalf("expected inspectable checkpoint row failure, got %v", err)
 		}
@@ -188,7 +211,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 				statement += " INSERT INTO migration_missing_table VALUES (1);"
 			}
 			writeMigration(t, path, "0001_release.sql", statement)
-			err := migrate.Run(t.Context(), migrate.Options{DB: database, Path: path})
+			err := migrate.Run(t.Context(), migrate.Options{DB: database, FS: os.DirFS(path)})
 			if !errors.Is(err, errs.ErrLockReleaseFailed) {
 				t.Fatalf("expected inspectable lock release failure, got %v", err)
 			}
@@ -205,12 +228,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 	})
 
 	t.Run("connection requirements", func(t *testing.T) {
-		for _, tc := range []struct {
-			name            string
-			multiStatements bool
-			selected        bool
-			want            error
-		}{
+		for _, tc := range []migrationConnectionRequirementCase{
 			{name: "no selected database", multiStatements: true, want: errs.ErrDatabaseNotSelected},
 			{name: "multiple statements disabled", selected: true, want: errs.ErrMultiStatementsRequired},
 		} {
@@ -219,7 +237,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 				pool := migrationPool(t, server.DSN, tc.multiStatements, tc.selected)
 				path := t.TempDir()
 				writeMigration(t, path, "0001_items.sql", "CREATE TABLE migration_items (id INT PRIMARY KEY);")
-				err := migrate.Run(t.Context(), migrate.Options{DB: pool, Path: path})
+				err := migrate.Run(t.Context(), migrate.Options{DB: pool, FS: os.DirFS(path)})
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("expected %v, got %v", tc.want, err)
 				}
@@ -236,10 +254,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 	})
 
 	t.Run("invalid initial sessions stop before metadata", func(t *testing.T) {
-		for _, tc := range []struct {
-			name  string
-			setup string
-		}{
+		for _, tc := range []migrationInitialSessionCase{
 			{name: "autocommit disabled", setup: "SET autocommit = 0;"},
 			{name: "transaction open", setup: "START TRANSACTION; INSERT INTO migration_items VALUES (1);"},
 		} {
@@ -253,7 +268,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 				path := t.TempDir()
 				writeMigration(t, path, "0001_next.sql", "CREATE TABLE migration_next (id INT PRIMARY KEY);")
 
-				err := migrate.Run(t.Context(), migrate.Options{DB: pool, Path: path})
+				err := migrate.Run(t.Context(), migrate.Options{DB: pool, FS: os.DirFS(path)})
 				if !errors.Is(err, errs.ErrInvalidSessionState) {
 					t.Fatalf("expected initial session-state error, got %v", err)
 				}
@@ -268,12 +283,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 	})
 
 	t.Run("file boundaries preserve committed versions and isolate sessions", func(t *testing.T) {
-		for _, tc := range []struct {
-			name       string
-			statement  string
-			mysqlCode  uint16
-			createsDDL bool
-		}{
+		for _, tc := range []migrationSessionBoundaryCase{
 			{
 				name:      "unfinished transaction",
 				statement: "START TRANSACTION; INSERT INTO migration_items VALUES (2);",
@@ -305,7 +315,7 @@ INSERT INTO migration_items VALUES (1);
 `)
 				writeMigration(t, path, "0002_session.sql", "SET @margo_migration_test = 1; SET SESSION foreign_key_checks = 0; "+tc.statement)
 				writeMigration(t, path, "0003_next.sql", "CREATE TABLE migration_next (id INT PRIMARY KEY);")
-				err := migrate.Run(t.Context(), migrate.Options{DB: pool, Path: path})
+				err := migrate.Run(t.Context(), migrate.Options{DB: pool, FS: os.DirFS(path)})
 				if tc.mysqlCode != 0 {
 					assertMigrationFailure(t, err, "0002_session.sql", tc.mysqlCode)
 				} else if !errors.Is(err, errs.ErrInvalidSessionState) || !errors.Is(err, errs.ErrMigrationFailed) || !strings.Contains(err.Error(), "0002_session.sql") {
@@ -377,7 +387,7 @@ COMMIT;
 		path, release, first := blockedMigration(t, t.Context(), database)
 		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 		defer cancel()
-		err := migrate.Run(ctx, migrate.Options{DB: database, Path: path})
+		err := migrate.Run(ctx, migrate.Options{DB: database, FS: os.DirFS(path)})
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("expected cancellation while acquiring migration lock, got %v", err)
 		}
@@ -419,7 +429,7 @@ INSERT IGNORE INTO migration_items VALUES (1);
 		path, release, first := blockedMigration(t, t.Context(), database)
 		ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 		defer cancel()
-		err := migrate.Run(ctx, migrate.Options{DB: database, Path: path})
+		err := migrate.Run(ctx, migrate.Options{DB: database, FS: os.DirFS(path)})
 		if !errors.Is(err, errs.ErrLockTimeout) {
 			t.Fatalf("expected 30-second advisory-lock timeout, got %v", err)
 		}
@@ -478,7 +488,7 @@ func runMigrations(t testing.TB, database *sql.DB, path string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	if err := migrate.Run(ctx, migrate.Options{DB: database, Path: path}); err != nil {
+	if err := migrate.Run(ctx, migrate.Options{DB: database, FS: os.DirFS(path)}); err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
 }
@@ -613,7 +623,7 @@ func startMigration(t testing.TB, ctx context.Context, database *sql.DB, path st
 	t.Helper()
 	ctx, cancel := context.WithCancel(ctx)
 	result := make(chan error, 1)
-	done := make(chan struct{})
+	done := make(chan migrationDone)
 	t.Cleanup(func() {
 		cancel()
 		// The suite timeout bounds a broken cancellation path. Do not let the
@@ -622,7 +632,7 @@ func startMigration(t testing.TB, ctx context.Context, database *sql.DB, path st
 	})
 	go func() {
 		defer close(done)
-		result <- migrate.Run(ctx, migrate.Options{DB: database, Path: path})
+		result <- migrate.Run(ctx, migrate.Options{DB: database, FS: os.DirFS(path)})
 	}()
 	return result
 }

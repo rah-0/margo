@@ -6,7 +6,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -24,12 +27,37 @@ import (
 	testerrs "github.com/rah-0/margo/tests/errs"
 )
 
+type borrowedQueriesCase struct {
+	name   string
+	source fs.FS
+	want   error
+	custom bool
+}
+
+type borrowedErrorsCase struct {
+	name       string
+	database   driver.Value
+	queryErr   error
+	migration  bool
+	filesystem bool
+	want       error
+}
+
+type generationSentinelsCase struct {
+	name   string
+	module string
+	query  string
+	want   error
+}
+
+type connectionSignal struct{}
+
 // Each pool has its own connector, with no registered driver or global test state.
 type testConnector struct {
 	database driver.Value
 	queryErr error
 	block    bool
-	started  chan struct{}
+	started  chan connectionSignal
 	closed   atomic.Int32
 }
 
@@ -44,7 +72,9 @@ func (testDriver) Open(string) (driver.Conn, error) {
 	return nil, testerrs.ErrConnectorRequired
 }
 
-type testConn struct{ connector *testConnector }
+type testConn struct {
+	connector *testConnector
+}
 
 func (c *testConn) Close() error { c.connector.closed.Add(1); return nil }
 func (*testConn) Begin() (driver.Tx, error) {
@@ -72,7 +102,9 @@ func (c *testConn) QueryContext(ctx context.Context, query string, args []driver
 	return new(testRows), nil
 }
 
-type testRows struct{ values [][]driver.Value }
+type testRows struct {
+	values [][]driver.Value
+}
 
 func (*testRows) Columns() []string { return []string{"value"} }
 func (*testRows) Close() error      { return nil }
@@ -122,16 +154,74 @@ func TestRunBorrowedEmptySchema(t *testing.T) {
 	assertPoolOpen(t, pool, connector)
 }
 
+func TestRunBorrowedQueriesFS(t *testing.T) {
+	t.Parallel()
+	readErr := &fs.PathError{Op: "open", Path: "FindCount.sql", Err: fs.ErrPermission}
+	queries := fstest.MapFS{"FindCount.sql": {Data: []byte("-- Returns: count\n-- ResultMode: one\nSELECT 1 AS count;")}}
+	for _, test := range []borrowedQueriesCase{
+		{name: "named queries", source: queries, custom: true},
+		{name: "empty root", source: fstest.MapFS{}},
+		{name: "open only", source: &observedFS{source: queries}, custom: true},
+		{name: "read failure", source: &observedFS{source: queries, err: readErr, errPath: readErr.Path}, want: readErr},
+		{name: "invalid query", source: fstest.MapFS{"Invalid.sql": {Data: []byte("SELECT * FROM alpha;")}}, want: errs.ErrSelectStarNotAllowed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			connector := &testConnector{database: "app"}
+			pool := borrowedTestPool(t, connector)
+			output := t.TempDir()
+			if err := os.WriteFile(filepath.Join(output, "go.mod"), []byte("module example.com/generated\n\ngo 1.27\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			paths := []string{filepath.Join(output, "App", "queries.go"), filepath.Join(output, "errs", "errors.go")}
+			for _, path := range paths {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("existing output"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			opts := runner.Options{DB: pool, OutputPath: output, Inputs: runner.Inputs{Queries: test.source}}
+			err := runner.Run(t.Context(), opts)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("Run error = %v, want %v", err, test.want)
+			}
+			if test.want == readErr {
+				var pathErr *fs.PathError
+				if !errors.As(err, &pathErr) || pathErr != readErr || !errors.Is(err, fs.ErrPermission) {
+					t.Fatalf("query read error lost its filesystem cause: %v", err)
+				}
+			}
+			for _, path := range paths {
+				content, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if test.want != nil && string(content) != "existing output" {
+					t.Fatalf("query failure replaced %s", path)
+				}
+				if test.want == nil {
+					if _, err := parser.ParseFile(token.NewFileSet(), path, content, parser.AllErrors); err != nil {
+						t.Fatalf("query source did not generate valid Go in %s: %v", path, err)
+					}
+				}
+				if test.want == nil && path == paths[0] && strings.Contains(string(content), "func QueryFindCount(") != test.custom {
+					t.Fatal("generated queries do not match the filesystem source")
+				}
+			}
+			if test.want == nil {
+				if err := runner.Run(t.Context(), opts); err != nil {
+					t.Fatalf("rerun with the same filesystem failed: %v", err)
+				}
+			}
+			assertPoolOpen(t, pool, connector)
+		})
+	}
+}
+
 func TestRunBorrowedErrors(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name       string
-		database   driver.Value
-		queryErr   error
-		migration  bool
-		filesystem bool
-		want       error
-	}{
+	for _, tc := range []borrowedErrorsCase{
 		{name: "null selection", want: errs.ErrDatabaseNotSelected},
 		{name: "empty selection", database: "", want: errs.ErrDatabaseNotSelected},
 		{name: "schema query", database: "app", queryErr: testerrs.ErrSchemaUnavailable, want: testerrs.ErrSchemaUnavailable},
@@ -145,12 +235,13 @@ func TestRunBorrowedErrors(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "output")
 			opts := runner.Options{DB: pool, OutputPath: output}
 			if tc.filesystem {
-				opts.MigrationsFS = fstest.MapFS{"invalid.sql": {Data: []byte("DO 0;")}}
+				opts.Inputs.Migrations = fstest.MapFS{"invalid.sql": {Data: []byte("DO 0;")}}
 			} else if tc.migration {
-				opts.MigrationsPath = t.TempDir()
-				if err := os.WriteFile(filepath.Join(opts.MigrationsPath, "invalid.sql"), []byte("DO 0;"), 0o600); err != nil {
+				root := t.TempDir()
+				if err := os.WriteFile(filepath.Join(root, "invalid.sql"), []byte("DO 0;"), 0o600); err != nil {
 					t.Fatal(err)
 				}
+				opts.Inputs.Migrations = os.DirFS(root)
 			}
 			err := runner.Run(t.Context(), opts)
 			if !errors.Is(err, tc.want) {
@@ -168,7 +259,7 @@ func TestRunBorrowedErrors(t *testing.T) {
 
 func TestRunBorrowedCancellation(t *testing.T) {
 	t.Parallel()
-	connector := &testConnector{database: "app", block: true, started: make(chan struct{})}
+	connector := &testConnector{database: "app", block: true, started: make(chan connectionSignal)}
 	pool := borrowedTestPool(t, connector)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -204,12 +295,7 @@ func TestRunGenerationFilesystemError(t *testing.T) {
 
 func TestRunGenerationSentinels(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name   string
-		module string
-		query  string
-		want   error
-	}{
+	for _, tc := range []generationSentinelsCase{
 		{name: "missing module", want: errs.ErrGoModuleNotFound},
 		{name: "missing module directive", module: "go 1.27\n", want: errs.ErrModuleDirectiveNotFound},
 		{name: "select star", module: "module example.com/generated\n\ngo 1.27\n", query: "SELECT * FROM users;", want: errs.ErrSelectStarNotAllowed},
@@ -226,10 +312,7 @@ func TestRunGenerationSentinels(t *testing.T) {
 			}
 			opts := runner.Options{DB: pool, OutputPath: filepath.Join(root, "generated")}
 			if tc.query != "" {
-				opts.QueriesPath = t.TempDir()
-				if err := os.WriteFile(filepath.Join(opts.QueriesPath, "FindUsers.sql"), []byte(tc.query), 0o600); err != nil {
-					t.Fatal(err)
-				}
+				opts.Inputs.Queries = fstest.MapFS{"FindUsers.sql": {Data: []byte(tc.query)}}
 			}
 			if err := runner.Run(t.Context(), opts); !errors.Is(err, tc.want) {
 				t.Fatalf("Run error = %v, want %v", err, tc.want)

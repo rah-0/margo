@@ -11,13 +11,12 @@ import (
 	"github.com/rah-0/margo/util"
 )
 
-// Renderer carries the schema and paths for one generation invocation.
+// Renderer carries the database name and output path for one generation invocation.
 // Resolve OutputPath symlinks before creating database or table child paths.
 // Independent renderers may run concurrently with separate output directories.
 type Renderer struct {
-	DBName      string
-	OutputPath  string
-	QueriesPath string
+	DBName     string
+	OutputPath string
 }
 
 func (r Renderer) CreateGoFileEntity(rawTableName string, tfs []structs.TableField, nqs []structs.NamedQuery) error {

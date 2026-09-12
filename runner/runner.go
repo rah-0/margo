@@ -11,17 +11,18 @@ import (
 	"github.com/rah-0/margo/db"
 	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/migrate"
+	"github.com/rah-0/margo/query"
 	"github.com/rah-0/margo/structs"
 	"github.com/rah-0/margo/template"
 )
 
-// Run validates the requested paths and filesystem, acquires a connection,
-// applies migrations, and then generates bindings. With no paths or filesystem
+// Run validates input roots and the output path, acquires a connection, applies
+// migrations, loads queries, and generates bindings. With no inputs or output
 // it succeeds without any work.
 // It never closes a caller-supplied DB or changes process configuration.
 func Run(ctx context.Context, opts Options) (err error) {
-	migrationsEnabled := opts.MigrationsPath != "" || opts.MigrationsFS != nil
-	if opts.OutputPath == "" && opts.QueriesPath == "" && !migrationsEnabled {
+	migrationsEnabled := opts.Inputs.Migrations != nil
+	if opts.OutputPath == "" && opts.Inputs.Queries == nil && !migrationsEnabled {
 		return nil
 	}
 	if err := opts.validate(ctx); err != nil {
@@ -61,7 +62,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 	}
 
 	if migrationsEnabled {
-		if err := migrate.Run(ctx, migrate.Options{DB: conn, Path: opts.MigrationsPath, FS: opts.MigrationsFS}); err != nil {
+		if err := migrate.Run(ctx, migrate.Options{DB: conn, FS: opts.Inputs.Migrations}); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
@@ -72,7 +73,18 @@ func Run(ctx context.Context, opts Options) (err error) {
 		return nil
 	}
 
-	renderer := template.Renderer{DBName: database, OutputPath: opts.OutputPath, QueriesPath: opts.QueriesPath}
+	var queries []structs.NamedQuery
+	if opts.Inputs.Queries != nil {
+		queries, err = query.Load(ctx, opts.Inputs.Queries)
+		if err != nil {
+			return fmt.Errorf("load queries: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	renderer := template.Renderer{DBName: database, OutputPath: opts.OutputPath}
 	if err = renderer.PathCreateOutputDir(); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
@@ -103,7 +115,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 		return err
 	}
 
-	nqs, err := renderer.CreateGoFileQueries(tableNames)
+	nqs, err := renderer.CreateGoFileQueries(tableNames, queries)
 	if err != nil {
 		return fmt.Errorf("create queries file: %w", err)
 	}

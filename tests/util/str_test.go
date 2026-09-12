@@ -6,11 +6,13 @@ import (
 	"github.com/rah-0/margo/util"
 )
 
+type capitalizeCase struct {
+	input  string
+	output string
+}
+
 func TestCapitalize(t *testing.T) {
-	tests := []struct {
-		input  string
-		output string
-	}{
+	tests := []capitalizeCase{
 		{"", ""},
 		{"a", "A"},
 		{"A", "A"},

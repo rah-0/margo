@@ -17,8 +17,22 @@ import (
 	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/migrate"
 	"github.com/rah-0/margo/runner"
+	"github.com/rah-0/margo/tests/integration/testdata/itemqueries"
 	"github.com/rah-0/margo/tests/integration/testdata/migrations"
 )
+
+type migrationItem struct {
+	id            int
+	label, detail string
+}
+
+type migrationFilesystemCase struct {
+	name    string
+	source  fs.FS
+	direct  bool
+	owned   bool
+	runtime bool
+}
 
 func TestMigrationFilesystems(t *testing.T) {
 	server := StartMariaDB(t)
@@ -42,9 +56,9 @@ func TestMigrationFilesystems(t *testing.T) {
 			resetMigrationTables(t, pool)
 			var err error
 			if direct {
-				err = migrate.Run(t.Context(), migrate.Options{DB: pool, Path: path})
+				err = migrate.Run(t.Context(), migrate.Options{DB: pool, FS: os.DirFS(path)})
 			} else {
-				err = runner.Run(t.Context(), runner.Options{DB: pool, MigrationsPath: path})
+				err = runner.Run(t.Context(), runner.Options{DB: pool, Inputs: runner.Inputs{Migrations: os.DirFS(path)}})
 			}
 			if err != nil {
 				t.Fatalf("run migrations through symlink parent: %v", err)
@@ -59,31 +73,36 @@ func TestMigrationFilesystems(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		queries := t.TempDir()
-		writeTestFile(t, filepath.Join(queries, "GetDetail.sql"), []byte("-- Returns: detail\nSELECT detail FROM embedded_items WHERE id = ?;\n"))
+		queriesPath := filepath.Join(margoRepositoryDir(t), "tests", "integration", "testdata", "itemqueries")
 		var wantOutput map[string]string
-		for _, tc := range []struct {
-			name   string
-			source fs.FS
-			direct bool
-		}{
+		for _, tc := range []migrationFilesystemCase{
 			{name: "disk"},
-			{name: "embedded runner", source: migrations.Files},
+			{name: "embedded runner", source: migrations.Files, runtime: true},
+			{name: "embedded owned runner", source: migrations.Files, owned: true},
 			{name: "embedded migrate", source: migrations.Files, direct: true},
 			{name: "embedded subdirectory", source: subdirectory},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				migrationExec(t, pool, "DROP TABLE IF EXISTS embedded_items, "+migrate.TableName)
 				output := newMigrationOutputModule(t)
-				opts := runner.Options{DB: pool, OutputPath: output, QueriesPath: queries}
+				opts := runner.Options{DB: pool, OutputPath: output}
+				if tc.source == nil {
+					opts.Inputs.Queries = os.DirFS(queriesPath)
+				} else {
+					opts.Inputs.Queries = itemqueries.Files
+				}
+				if tc.owned {
+					opts.DB = nil
+					opts.Connection = &server.Settings
+				}
 				if tc.direct {
 					if err := migrate.Run(t.Context(), migrate.Options{DB: pool, FS: tc.source}); err != nil {
 						t.Fatal(err)
 					}
 				} else if tc.source != nil {
-					opts.MigrationsFS = tc.source
+					opts.Inputs.Migrations = tc.source
 				} else {
-					opts.MigrationsPath = filepath.Join(margoRepositoryDir(t), "tests", "integration", "testdata", "migrations")
+					opts.Inputs.Migrations = os.DirFS(filepath.Join(margoRepositoryDir(t), "tests", "integration", "testdata", "migrations"))
 				}
 				if err := runner.Run(t.Context(), opts); err != nil {
 					t.Fatal(err)
@@ -94,13 +113,9 @@ func TestMigrationFilesystems(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer rows.Close()
-				type item struct {
-					id            int
-					label, detail string
-				}
-				var got []item
+				var got []migrationItem
 				for rows.Next() {
-					var value item
+					var value migrationItem
 					if err := rows.Scan(&value.id, &value.label, &value.detail); err != nil {
 						t.Fatal(err)
 					}
@@ -109,7 +124,7 @@ func TestMigrationFilesystems(t *testing.T) {
 				if err := rows.Err(); err != nil {
 					t.Fatal(err)
 				}
-				want := []item{{1, "embedded", "migrated"}, {2, "second; embedded", "added"}}
+				want := []migrationItem{{1, "embedded", "migrated"}, {2, "second; embedded", "added"}}
 				if !slices.Equal(got, want) {
 					t.Fatalf("migrated rows = %+v, want %+v", got, want)
 				}
@@ -139,6 +154,11 @@ func TestMigrationFilesystems(t *testing.T) {
 				} else if !maps.Equal(gotOutput, wantOutput) {
 					t.Error("disk and embedded migrations generated different output")
 				}
+				if tc.runtime {
+					writeTestFile(t, filepath.Join(output, "MargoTest", "runtime_test.go"), []byte(embeddedQueryRuntimeTests))
+					runTestCommand(t, output, append(os.Environ(), "GOWORK=off", "MARGO_INTEGRATION_DSN="+server.DSN),
+						"go", "test", "-mod=mod", "-count=1", "-race", "-cover", "-covermode=atomic", "-p=1", "./...")
+				}
 			})
 		}
 	})
@@ -162,7 +182,7 @@ func TestMigrationFilesystems(t *testing.T) {
 					if mode == "migrate" {
 						return migrate.Run(t.Context(), migrate.Options{DB: pool, FS: source})
 					}
-					return runner.Run(t.Context(), runner.Options{DB: pool, MigrationsFS: source, OutputPath: output})
+					return runner.Run(t.Context(), runner.Options{DB: pool, OutputPath: output, Inputs: runner.Inputs{Migrations: source}})
 				}
 				err := run()
 				var pathError *fs.PathError
@@ -222,7 +242,7 @@ func TestMigrationFilesystems(t *testing.T) {
 			if direct {
 				err = migrate.Run(t.Context(), migrate.Options{DB: pool, FS: fstest.MapFS{}})
 			} else {
-				err = runner.Run(t.Context(), runner.Options{DB: pool, MigrationsFS: fstest.MapFS{}})
+				err = runner.Run(t.Context(), runner.Options{DB: pool, Inputs: runner.Inputs{Migrations: fstest.MapFS{}}})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -241,7 +261,7 @@ func TestMigrationFilesystems(t *testing.T) {
 			if direct {
 				err = migrate.Run(ctx, migrate.Options{DB: pool, FS: source})
 			} else {
-				err = runner.Run(ctx, runner.Options{DB: pool, MigrationsFS: source})
+				err = runner.Run(ctx, runner.Options{DB: pool, Inputs: runner.Inputs{Migrations: source}})
 			}
 			if !errors.Is(err, context.Canceled) {
 				t.Fatalf("read-boundary cancellation = %v", err)
@@ -332,3 +352,40 @@ func assertMigrationFSOwnership(t *testing.T, source *migrationReadFS) {
 		t.Error("migration runner closed the caller-owned filesystem")
 	}
 }
+
+const embeddedQueryRuntimeTests = `package MargoTest_test
+
+import (
+	"database/sql"
+	"os"
+	"testing"
+
+	_ "github.com/go-sql-driver/mysql"
+
+	generated "github.com/rah-0/margo/tests/integration/migratedtest/MargoTest"
+	"github.com/rah-0/margo/tests/integration/migratedtest/MargoTest/EmbeddedItems"
+)
+
+func TestEmbeddedQueriesUseMigratedSchema(t *testing.T) {
+	database, err := sql.Open("mysql", os.Getenv("MARGO_INTEGRATION_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := generated.SetDB(database); err != nil {
+		t.Fatal(err)
+	}
+	detail := generated.QueryGetDetail(generated.NewQueryParams().WithParams("1"))
+	if detail.Error != nil || detail.Entity == nil || detail.Entity.Detail != "migrated" {
+		t.Fatalf("general embedded query returned %+v", detail)
+	}
+	item := EmbeddedItems.QueryGetItem(EmbeddedItems.NewQueryParams().WithParams("2"))
+	if item.Error != nil || item.Entity == nil || item.Entity.Id != "2" || item.Entity.Label != "second; embedded" || item.Entity.Detail != "added" {
+		t.Fatalf("mapped embedded query returned %+v", item)
+	}
+}
+`

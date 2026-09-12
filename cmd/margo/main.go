@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/internal/cli"
 	"github.com/rah-0/margo/runner"
@@ -44,8 +45,21 @@ func execute(ctx context.Context, args []string, output io.Writer) int {
 	if active && opts.Connection.Port == "" {
 		// Active CLI operations require a non-empty port.
 		err = fmt.Errorf("%w: -dbPort: must not be empty", errs.ErrInvalidConnection)
-	} else {
-		err = runner.Run(ctx, opts)
+	} else if active && ctx.Err() != nil {
+		err = ctx.Err()
+	} else if err = conf.ValidatePaths(opts.OutputPath, opts.QueriesPath, opts.MigrationsPath); err == nil {
+		inputs := runner.Inputs{}
+		if opts.MigrationsPath != "" {
+			inputs.Migrations = os.DirFS(opts.MigrationsPath)
+		}
+		if opts.QueriesPath != "" {
+			inputs.Queries = os.DirFS(opts.QueriesPath)
+		}
+		err = runner.Run(ctx, runner.Options{
+			Connection: opts.Connection,
+			OutputPath: opts.OutputPath,
+			Inputs:     inputs,
+		})
 	}
 	if err != nil {
 		slogx.Error("margo failed", err)

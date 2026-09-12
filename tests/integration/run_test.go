@@ -7,6 +7,7 @@ import (
 	"embed"
 	"errors"
 	"flag"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/rah-0/margo/migrate"
 	"github.com/rah-0/margo/runner"
 	"github.com/rah-0/margo/tests/integration/testdata/migrations"
+	queryfixture "github.com/rah-0/margo/tests/integration/testdata/queries"
 )
 
 // These tests import the public runner API from a separate package, as a consumer
@@ -30,6 +32,31 @@ import (
 //
 //go:embed testdata/migrations/*.sql
 var embeddedMigrations embed.FS
+
+//go:embed testdata/queries/*.sql
+var embeddedQueries embed.FS
+
+type runOperationCase struct {
+	name                        string
+	output, queries, migrations bool
+	filesystem                  bool
+	queriesFilesystem           bool
+	want                        error
+}
+
+type runQuerySourceValidationCase struct {
+	name   string
+	source fs.FS
+	output bool
+	want   error
+}
+
+type runQueryFilesystemCase struct {
+	name    string
+	source  fs.FS
+	owned   bool
+	runtime bool
+}
 
 func TestRunOperations(t *testing.T) {
 	server := StartMariaDB(t)
@@ -46,24 +73,23 @@ func TestRunOperations(t *testing.T) {
 			mode = "owned"
 		}
 		t.Run(mode, func(t *testing.T) {
-			for _, tc := range []struct {
-				name                        string
-				output, queries, migrations bool
-				filesystem                  bool
-				want                        error
-			}{
+			for _, tc := range []runOperationCase{
 				{name: "no paths"},
 				{name: "output", output: true},
 				{name: "output and queries", output: true, queries: true},
+				{name: "output and query filesystem", output: true, queries: true, queriesFilesystem: true},
 				{name: "migrations", migrations: true},
 				{name: "migrations and output", migrations: true, output: true},
 				{name: "all paths", migrations: true, output: true, queries: true},
 				{name: "filesystem", migrations: true, filesystem: true},
 				{name: "filesystem and output", migrations: true, filesystem: true, output: true},
 				{name: "filesystem and all paths", migrations: true, filesystem: true, output: true, queries: true},
+				{name: "both filesystems and output", migrations: true, filesystem: true, output: true, queries: true, queriesFilesystem: true},
 				{name: "queries without output", queries: true, want: errs.ErrQueriesWithoutOutput},
 				{name: "migrations and queries without output", migrations: true, queries: true, want: errs.ErrQueriesWithoutOutput},
 				{name: "filesystem and queries without output", migrations: true, filesystem: true, queries: true, want: errs.ErrQueriesWithoutOutput},
+				{name: "query filesystem without output", queries: true, queriesFilesystem: true, want: errs.ErrQueriesWithoutOutput},
+				{name: "both filesystems without output", migrations: true, filesystem: true, queries: true, queriesFilesystem: true, want: errs.ErrQueriesWithoutOutput},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					migrationExec(t, server.DB, "DROP TABLE IF EXISTS api_items, "+migrate.TableName)
@@ -78,15 +104,21 @@ func TestRunOperations(t *testing.T) {
 						opts.OutputPath = filepath.Join(module, "generated")
 					}
 					if tc.queries {
-						opts.QueriesPath = queries
+						if tc.queriesFilesystem {
+							opts.Inputs.Queries = fstest.MapFS{
+								"GetIDs.sql": {Data: []byte("-- Returns: id\nSELECT id FROM all_types;\n")},
+							}
+						} else {
+							opts.Inputs.Queries = os.DirFS(queries)
+						}
 					}
 					if tc.migrations {
 						if tc.filesystem {
-							opts.MigrationsFS = fstest.MapFS{
+							opts.Inputs.Migrations = fstest.MapFS{
 								"0001_items.sql": {Data: []byte("CREATE TABLE api_items (id INT PRIMARY KEY); INSERT INTO api_items VALUES (1);")},
 							}
 						} else {
-							opts.MigrationsPath = migrations
+							opts.Inputs.Migrations = os.DirFS(migrations)
 						}
 					}
 					if err := runner.Run(t.Context(), opts); !errors.Is(err, tc.want) {
@@ -104,7 +136,7 @@ func TestRunOperations(t *testing.T) {
 							t.Fatal(err)
 						}
 						if strings.Contains(string(content), "func QueryGetIDs(") != tc.queries {
-							t.Errorf("named query presence does not match QueriesPath")
+							t.Errorf("named query presence does not match query source")
 						}
 						if _, err := os.Stat(filepath.Join(root, "AllTypes", "entity.go")); err != nil {
 							t.Fatal(err)
@@ -136,6 +168,47 @@ func TestRunBorrowedErrors(t *testing.T) {
 	migrations := t.TempDir()
 	writeMigration(t, migrations, "0001_broken.sql", "INSERT INTO api_missing_table VALUES (1);")
 
+	t.Run("query source validation precedes migrations", func(t *testing.T) {
+		rootError := &fs.PathError{Op: "open", Path: ".", Err: fs.ErrPermission}
+		for _, tc := range []runQuerySourceValidationCase{
+			{name: "unreadable root", source: queryRootErrorFS{rootError}, output: true, want: fs.ErrPermission},
+			{name: "no output", source: queryfixture.Files, want: errs.ErrQueriesWithoutOutput},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				migrationExec(t, pool, "DROP TABLE IF EXISTS api_preflight, "+migrate.TableName)
+				module := newMigrationOutputModule(t)
+				before := snapshotMigrationOutput(t, module)
+				opts := runner.Options{
+					DB: pool,
+					Inputs: runner.Inputs{
+						Queries: tc.source,
+						Migrations: fstest.MapFS{
+							"0001_preflight.sql": {Data: []byte("CREATE TABLE api_preflight (id INT PRIMARY KEY);")},
+						},
+					},
+				}
+				if tc.output {
+					opts.OutputPath = filepath.Join(module, "missing", "generated")
+				}
+				err := runner.Run(t.Context(), opts)
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("query preflight = %v, want %v", err, tc.want)
+				}
+				if tc.want == fs.ErrPermission {
+					var pathError *fs.PathError
+					if !errors.As(err, &pathError) || pathError != rootError {
+						t.Fatalf("query root error lost filesystem cause: %v", err)
+					}
+				}
+				assertMigrationTableAbsent(t, pool, "api_preflight")
+				assertMigrationTableAbsent(t, pool, migrate.TableName)
+				if after := snapshotMigrationOutput(t, module); !maps.Equal(before, after) {
+					t.Error("query source validation changed output or created directories")
+				}
+			})
+		}
+	})
+
 	t.Run("migration failure preserves output", func(t *testing.T) {
 		for _, missing := range []bool{false, true} {
 			module := newMigrationOutputModule(t)
@@ -144,10 +217,39 @@ func TestRunBorrowedErrors(t *testing.T) {
 				output = filepath.Join(module, "missing", "generated")
 			}
 			before := snapshotMigrationOutput(t, module)
-			err := runner.Run(t.Context(), runner.Options{DB: pool, OutputPath: output, MigrationsPath: migrations})
+			err := runner.Run(t.Context(), runner.Options{DB: pool, OutputPath: output, Inputs: runner.Inputs{Migrations: os.DirFS(migrations)}})
 			assertMigrationFailure(t, err, "0001_broken.sql", 1146)
 			if after := snapshotMigrationOutput(t, module); !maps.Equal(before, after) {
 				t.Error("failed migration changed output or created directories")
+			}
+		}
+	})
+
+	t.Run("migration failure leaves embedded query bodies unread", func(t *testing.T) {
+		for _, missing := range []bool{false, true} {
+			module := newMigrationOutputModule(t)
+			output := module
+			if missing {
+				output = filepath.Join(module, "missing", "generated")
+			}
+			before := snapshotMigrationOutput(t, module)
+			source := &migrationReadFS{source: queryfixture.Files}
+			err := runner.Run(t.Context(), runner.Options{
+				DB: pool, OutputPath: output,
+				Inputs: runner.Inputs{
+					Queries: source,
+					Migrations: fstest.MapFS{
+						"0001_broken.sql": {Data: []byte("INSERT INTO api_missing_table VALUES (1);")},
+					},
+				},
+			})
+			assertMigrationFailure(t, err, "0001_broken.sql", 1146)
+			if len(source.bodies) != 0 {
+				t.Errorf("query bodies read before migrations succeeded: %v", source.bodies)
+			}
+			assertMigrationFSOwnership(t, source)
+			if after := snapshotMigrationOutput(t, module); !maps.Equal(before, after) {
+				t.Error("failed embedded migration changed output or created directories")
 			}
 		}
 	})
@@ -170,7 +272,7 @@ func TestRunBorrowedErrors(t *testing.T) {
 
 	t.Run("migrator requirements remain inspectable", func(t *testing.T) {
 		withoutMulti := migrationPool(t, server.DSN, false, true)
-		err := runner.Run(t.Context(), runner.Options{DB: withoutMulti, MigrationsPath: migrations})
+		err := runner.Run(t.Context(), runner.Options{DB: withoutMulti, Inputs: runner.Inputs{Migrations: os.DirFS(migrations)}})
 		if !errors.Is(err, errs.ErrMultiStatementsRequired) {
 			t.Fatalf("Run() = %v, want multi-statement requirement", err)
 		}
@@ -202,7 +304,7 @@ func TestRunBorrowedErrors(t *testing.T) {
 
 		t.Run("migration", func(t *testing.T) {
 			before := count(t)
-			err := runner.Run(t.Context(), runner.Options{Connection: &server.Settings, MigrationsPath: migrations})
+			err := runner.Run(t.Context(), runner.Options{Connection: &server.Settings, Inputs: runner.Inputs{Migrations: os.DirFS(migrations)}})
 			assertMigrationFailure(t, err, "0001_broken.sql", 1146)
 			assertClosed(t, before)
 		})
@@ -230,7 +332,7 @@ func TestRunBorrowedErrors(t *testing.T) {
 			// The disposable fixture user only has grants on margo_test.
 			connection.Database = "margo_forbidden"
 			before := count(t)
-			err := runner.Run(t.Context(), runner.Options{Connection: &connection, MigrationsPath: migrations})
+			err := runner.Run(t.Context(), runner.Options{Connection: &connection, Inputs: runner.Inputs{Migrations: os.DirFS(migrations)}})
 			var databaseError *mysql.MySQLError
 			if !errors.As(err, &databaseError) || databaseError.Number != 1044 {
 				t.Fatalf("expected inspectable bootstrap permission failure, got %v", err)
@@ -244,7 +346,7 @@ func TestRunBorrowedErrors(t *testing.T) {
 		writeMigration(t, path, "0001_slow.sql", "DO SLEEP(10);")
 		ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
 		defer cancel()
-		err := runner.Run(ctx, runner.Options{DB: pool, MigrationsPath: path})
+		err := runner.Run(ctx, runner.Options{DB: pool, Inputs: runner.Inputs{Migrations: os.DirFS(path)}})
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("Run() = %v, want deadline exceeded", err)
 		}
@@ -255,6 +357,68 @@ func TestRunBorrowedErrors(t *testing.T) {
 
 	if err := pool.PingContext(t.Context()); err != nil {
 		t.Fatalf("borrowed pool closed after failure: %v", err)
+	}
+}
+
+func TestRunQueryReadFailureAfterMigrations(t *testing.T) {
+	server := StartMariaDB(t)
+	pool := migrationPool(t, server.DSN, true, true)
+	for _, missing := range []bool{false, true} {
+		name := "existing output"
+		if missing {
+			name = "missing output"
+		}
+		t.Run(name, func(t *testing.T) {
+			migrationExec(t, pool, "DROP TABLE IF EXISTS api_query_failure, "+migrate.TableName)
+			module := newMigrationOutputModule(t)
+			output := module
+			if missing {
+				output = filepath.Join(module, "missing", "generated")
+			} else {
+				for _, directory := range []string{"MargoTest", "errs"} {
+					if err := os.MkdirAll(filepath.Join(output, directory), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				writeTestFile(t, filepath.Join(output, "MargoTest", "queries.go"), []byte("preserve existing queries\n"))
+				writeTestFile(t, filepath.Join(output, "errs", "errors.go"), []byte("preserve existing errors\n"))
+			}
+			before := snapshotMigrationOutput(t, module)
+			cause := &fs.PathError{Op: "read", Path: "BUnreadable.sql", Err: fs.ErrPermission}
+			source := &migrationReadFS{
+				source: fstest.MapFS{
+					"AReady.sql":      {Data: []byte("-- Returns: id\nSELECT id FROM api_query_failure;")},
+					"BUnreadable.sql": {},
+					"CLater.sql":      {},
+				},
+				faults: map[string]error{"BUnreadable.sql": cause},
+			}
+			err := runner.Run(t.Context(), runner.Options{
+				DB: pool, OutputPath: output,
+				Inputs: runner.Inputs{
+					Migrations: fstest.MapFS{
+						"0001_items.sql": {Data: []byte("CREATE TABLE api_query_failure (id INT PRIMARY KEY); INSERT INTO api_query_failure VALUES (1);")},
+					},
+					Queries: source,
+				},
+			})
+			var pathError *fs.PathError
+			if !errors.Is(err, fs.ErrPermission) || !errors.As(err, &pathError) || pathError != cause || !strings.Contains(err.Error(), "BUnreadable.sql") {
+				t.Fatalf("query read failure lost filename or filesystem cause: %v", err)
+			}
+			if !slices.Equal(source.bodies, []string{"AReady.sql", "BUnreadable.sql"}) {
+				t.Errorf("query reads continued after failure: %v", source.bodies)
+			}
+			assertMigrationVersion(t, pool, 1)
+			assertMigrationCount(t, pool, "api_query_failure", 1)
+			assertMigrationFSOwnership(t, source)
+			if after := snapshotMigrationOutput(t, module); !maps.Equal(before, after) {
+				t.Error("query read failure modified output or created directories")
+			}
+			if err := pool.PingContext(t.Context()); err != nil {
+				t.Fatalf("query read failure closed the borrowed pool: %v", err)
+			}
+		})
 	}
 }
 
@@ -270,12 +434,38 @@ func TestRunEmbeddedBootstrap(t *testing.T) {
 	if !errors.As(err, &databaseError) || databaseError.Number != 1049 {
 		t.Fatalf("generation without migrations should retain unknown-database error: %v", err)
 	}
+	t.Run("invalid query sources do not bootstrap the database", func(t *testing.T) {
+		serverPool := migrationPool(t, server.DSN, true, false)
+		module := newMigrationOutputModule(t)
+		before := snapshotMigrationOutput(t, module)
+		opts := runner.Options{
+			Connection: &server.Settings, OutputPath: filepath.Join(module, "missing"),
+			Inputs: runner.Inputs{
+				Migrations: migrations.Files,
+				Queries:    queryRootErrorFS{&fs.PathError{Op: "open", Path: ".", Err: fs.ErrPermission}},
+			},
+		}
+		want := fs.ErrPermission
+		if err := runner.Run(t.Context(), opts); !errors.Is(err, want) {
+			t.Fatalf("query preflight before bootstrap = %v, want %v", err, want)
+		}
+		var count int
+		if err := serverPool.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", server.Settings.Database).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Error("invalid query source created the missing database")
+		}
+		if after := snapshotMigrationOutput(t, module); !maps.Equal(before, after) {
+			t.Error("invalid query source created output")
+		}
+	})
 	workingDir := t.TempDir()
 	t.Chdir(workingDir)
 	before := snapshotMigrationOutput(t, workingDir)
 	connection := server.Settings
 	original := connection
-	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, MigrationsFS: migrations.Files}); err != nil {
+	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, Inputs: runner.Inputs{Migrations: migrations.Files}}); err != nil {
 		t.Fatal(err)
 	}
 	if connection != original {
@@ -288,7 +478,7 @@ func TestRunEmbeddedBootstrap(t *testing.T) {
 	assertCLIMigrationVersion(t, pool, 2)
 	assertCLIMigrationTable(t, pool, "embedded_items", true)
 	assertMigrationCount(t, pool, "embedded_items", 2)
-	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, MigrationsFS: migrations.Files}); err != nil {
+	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, Inputs: runner.Inputs{Migrations: migrations.Files}}); err != nil {
 		t.Fatalf("rerun embedded migrations: %v", err)
 	}
 	assertCLIMigrationVersion(t, pool, 2)
@@ -305,7 +495,7 @@ func TestRunIndependentCalls(t *testing.T) {
 	for i, server := range servers {
 		opts := runner.Options{Connection: &server.Settings, OutputPath: outputs[i]}
 		if i == 0 {
-			opts.QueriesPath = queries
+			opts.Inputs.Queries = os.DirFS(queries)
 		}
 		if err := runner.Run(t.Context(), opts); err != nil {
 			t.Fatal(err)
@@ -355,15 +545,44 @@ func TestRunCLIEquivalenceAndRuntime(t *testing.T) {
 	packageOutput := newRunRuntimeModule(t)
 	queries := filepath.Join(margoRepositoryDir(t), "tests", "integration", "testdata", "queries")
 	GenerateInto(t, server, cliOutput, queries)
-	if err := runner.Run(t.Context(), runner.Options{DB: server.DB, OutputPath: packageOutput, QueriesPath: queries}); err != nil {
+	if err := runner.Run(t.Context(), runner.Options{DB: server.DB, OutputPath: packageOutput, Inputs: runner.Inputs{Queries: os.DirFS(queries)}}); err != nil {
 		t.Fatal(err)
 	}
 	if !maps.Equal(snapshotMigrationOutput(t, cliOutput), snapshotMigrationOutput(t, packageOutput)) {
 		t.Error("CLI and package generated different files for identical schemas and module names")
 	}
-	writeTestFile(t, filepath.Join(packageOutput, "MargoTest", "runtime_test.go"), generatedRuntimeTests)
-	runTestCommand(t, packageOutput, append(os.Environ(), "GOWORK=off", "MARGO_INTEGRATION_DSN="+server.DSN),
-		"go", "test", "-mod=mod", "-tags=margo_generated_runtime", "-count=1", "-race", "-cover", "-covermode=atomic", "-p=1", "./...")
+	subdirectory, err := fs.Sub(embeddedQueries, "testdata/queries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []runQueryFilesystemCase{
+		{name: "embedded borrowed", source: queryfixture.Files, runtime: true},
+		{name: "embedded owned", source: queryfixture.Files, owned: true},
+		{name: "embedded subdirectory", source: subdirectory},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output := newRunRuntimeModule(t)
+			opts := runner.Options{DB: server.DB, OutputPath: output, Inputs: runner.Inputs{Queries: tc.source}}
+			if tc.owned {
+				opts.DB = nil
+				opts.Connection = &server.Settings
+			}
+			if err := runner.Run(t.Context(), opts); err != nil {
+				t.Fatal(err)
+			}
+			if !maps.Equal(snapshotMigrationOutput(t, cliOutput), snapshotMigrationOutput(t, output)) {
+				t.Error("disk and embedded query sources generated different files")
+			}
+			if err := server.DB.PingContext(t.Context()); err != nil {
+				t.Fatalf("borrowed pool is no longer usable: %v", err)
+			}
+			if tc.runtime {
+				writeTestFile(t, filepath.Join(output, "MargoTest", "runtime_test.go"), generatedRuntimeTests)
+				runTestCommand(t, output, append(os.Environ(), "GOWORK=off", "MARGO_INTEGRATION_DSN="+server.DSN),
+					"go", "test", "-mod=mod", "-tags=margo_generated_runtime", "-count=1", "-race", "-cover", "-covermode=atomic", "-p=1", "./...")
+			}
+		})
+	}
 }
 
 func TestRunLeavesProcessStateUntouched(t *testing.T) {
@@ -439,4 +658,12 @@ func newRunRuntimeModule(t *testing.T) string {
 	path := t.TempDir()
 	writeTestFile(t, filepath.Join(path, "go.mod"), []byte("module "+generatedTestModule+"\n\ngo 1.27\n\nrequire github.com/go-sql-driver/mysql v1.10.1\n"))
 	return path
+}
+
+type queryRootErrorFS struct {
+	err *fs.PathError
+}
+
+func (source queryRootErrorFS) Open(string) (fs.File, error) {
+	return nil, source.err
 }

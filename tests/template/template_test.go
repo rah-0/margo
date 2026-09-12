@@ -59,7 +59,7 @@ func TestCreateGoFilesWithoutModuleDoesNotCreateOutput(t *testing.T) {
 	if err := renderer.CreateGoFileEntity("alpha", tableFields, nil); !errors.Is(err, errs.ErrGoModuleNotFound) {
 		t.Fatalf("entity generation without module: %v", err)
 	}
-	if _, err := renderer.CreateGoFileQueries(nil); !errors.Is(err, errs.ErrGoModuleNotFound) {
+	if _, err := renderer.CreateGoFileQueries(nil, nil); !errors.Is(err, errs.ErrGoModuleNotFound) {
 		t.Fatalf("query generation without module: %v", err)
 	}
 	if _, err := os.Stat(renderer.OutputPath); !os.IsNotExist(err) {

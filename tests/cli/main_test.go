@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,12 +15,18 @@ import (
 
 	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/internal/cli"
-	"github.com/rah-0/margo/runner"
 	"github.com/rah-0/margo/structs"
 	testerrs "github.com/rah-0/margo/tests/errs"
 )
 
 var cliExecutable string
+
+type exitCodeCase struct {
+	mode string
+	args []string
+	code int
+	want string
+}
 
 func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
@@ -183,18 +188,10 @@ func TestParseOptionsUsesIndependentFlagSets(t *testing.T) {
 	if flag.CommandLine != global || global.Lookup("dbUser") != nil {
 		t.Fatal("CLI parsing modified global flags")
 	}
-	if err := runner.Run(context.Background(), second); err != nil {
-		t.Fatalf("public API rejected parsed no-op: %v", err)
-	}
 }
 
 func TestMainExitCodes(t *testing.T) {
-	for _, tt := range []struct {
-		mode string
-		args []string
-		code int
-		want string
-	}{
+	for _, tt := range []exitCodeCase{
 		{"help", []string{"-help"}, 0, "Usage of margo:"},
 		{"unknown", []string{"-not-a-margo-flag"}, 2, "flag provided but not defined"},
 		{"missing-value", []string{"-dbUser"}, 2, "flag needs an argument"},

@@ -10,7 +10,8 @@ production packages.
 
 ## Unit tests
 
-Unit tests need no database or Docker:
+Unit tests need no database or Docker. Filesystem cases exercise disk sources,
+in-memory sources, and the standard helpers' fallback through `Open`:
 
 ```bash
 GOWORK=off go -C tests test -count=1 -race -cover -covermode=atomic \
@@ -29,9 +30,12 @@ GOWORK=off go -C tests test -tags=integration -count=1 -race -cover -covermode=a
 The suite starts disposable MariaDB containers on random ports and cleans them
 up afterward. It checks disk and directly embedded migrations through both Go
 APIs, database bootstrap, migration failures and reruns, and equivalent generated
-output. Generation and generated CRUD and named queries use temporary Go
-modules; migration-only runs need no Go module. No existing database or local
-database credentials are required.
+output. Disk sources use `os.DirFS`; embedded sources are passed directly through
+`runner.Inputs` and `migrate.Options.FS`. Custom-query inputs cover general and
+table-mapped queries, including generation after embedded migrations. Generation
+and generated CRUD and named queries use temporary Go modules; migration-only
+runs need no Go module. No existing database or local database credentials are
+required.
 
 ## Static checks
 

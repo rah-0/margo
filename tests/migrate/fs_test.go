@@ -63,37 +63,37 @@ func (f *trackedDirectory) ReadDir(n int) ([]fs.DirEntry, error) {
 	return entries, err
 }
 
-func TestDiscoverFSOpenFallback(t *testing.T) {
+func TestDiscoverOpenFallback(t *testing.T) {
 	source := &openOnlyFS{source: fstest.MapFS{
 		"0002_second.sql": {Data: []byte("DO 2;")},
 		"0001_first.sql":  {Data: []byte("DO 1;")},
 		"nested/bad.sql":  {},
 	}}
-	migrations, err := migrate.DiscoverFS(source)
+	migrations, err := migrate.Discover(source)
 	want := []migrate.Migration{{Version: 1, Path: "0001_first.sql"}, {Version: 2, Path: "0002_second.sql"}}
 	if err != nil || !slices.Equal(migrations, want) {
-		t.Fatalf("DiscoverFS = %v, %v; want %v", migrations, err, want)
+		t.Fatalf("Discover = %v, %v; want %v", migrations, err, want)
 	}
 	if !slices.Equal(source.opened, []string{"."}) || !slices.Equal(source.closed, source.opened) {
 		t.Fatalf("discovery must read only the root and close its handle: opened=%v, closed=%v", source.opened, source.closed)
 	}
 }
 
-func TestDiscoverFSNil(t *testing.T) {
-	if _, err := migrate.DiscoverFS(nil); !errors.Is(err, fs.ErrInvalid) {
-		t.Fatalf("DiscoverFS(nil) error = %v, want fs.ErrInvalid", err)
+func TestDiscoverNil(t *testing.T) {
+	if _, err := migrate.Discover(nil); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("Discover(nil) error = %v, want fs.ErrInvalid", err)
 	}
 }
 
-func TestDiscoverFSInvalidRoot(t *testing.T) {
-	_, err := migrate.DiscoverFS(fstest.MapFS{".": {Data: []byte("not a directory")}})
+func TestDiscoverInvalidRoot(t *testing.T) {
+	_, err := migrate.Discover(fstest.MapFS{".": {Data: []byte("not a directory")}})
 	var pathErr *fs.PathError
 	if !errors.As(err, &pathErr) || pathErr.Path != "." {
-		t.Fatalf("DiscoverFS error = %v, want inspectable root filesystem error", err)
+		t.Fatalf("Discover error = %v, want inspectable root filesystem error", err)
 	}
 }
 
-func TestDiscoverFSEnumerationErrors(t *testing.T) {
+func TestDiscoverEnumerationErrors(t *testing.T) {
 	for _, stage := range []string{"open", "readdir"} {
 		t.Run(stage, func(t *testing.T) {
 			cause := &fs.PathError{Op: stage, Path: ".", Err: fs.ErrPermission}
@@ -103,10 +103,10 @@ func TestDiscoverFSEnumerationErrors(t *testing.T) {
 			} else {
 				source.readDirErr = cause
 			}
-			_, err := migrate.DiscoverFS(source)
+			_, err := migrate.Discover(source)
 			var pathErr *fs.PathError
 			if !errors.Is(err, fs.ErrPermission) || !errors.As(err, &pathErr) || pathErr != cause {
-				t.Fatalf("DiscoverFS error = %v, want original filesystem error %v", err, cause)
+				t.Fatalf("Discover error = %v, want original filesystem error %v", err, cause)
 			}
 			if stage == "readdir" && !slices.Equal(source.closed, []string{"."}) {
 				t.Fatalf("failed enumeration left directory open: closed=%v", source.closed)

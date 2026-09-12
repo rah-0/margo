@@ -27,6 +27,12 @@ var (
 	identifierSeed atomic.Uint64
 )
 
+type generatedMissingReturnsCase struct {
+	name string
+	mode string
+	errs []error
+}
+
 func TestMain(m *testing.M) {
 	dsn := os.Getenv("MARGO_INTEGRATION_DSN")
 	if dsn == "" {
@@ -124,11 +130,7 @@ func TestGeneratedMultipleRows(t *testing.T) {
 }
 
 func TestGeneratedMissingReturns(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		mode string
-		errs []error
-	}{
+	for _, test := range []generatedMissingReturnsCase{
 		{name: "MissingReturnsOne", mode: "one", errs: []error{
 			generated.QueryMissingReturnsOne().Error,
 			generated.QueryMissingReturnsOneCtx(t.Context()).Error,

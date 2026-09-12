@@ -14,17 +14,23 @@ import (
 	"github.com/rah-0/margo/migrate"
 )
 
+type migrationRunArgumentsCase struct {
+	name string
+	opts migrate.Options
+	want error
+}
+
+type migrationFilesystemErrorCase struct {
+	source fs.FS
+	cause  *fs.PathError
+}
+
 func TestRunArguments(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		opts migrate.Options
-		want error
-	}{
+	for _, test := range []migrationRunArgumentsCase{
 		{name: "missing database", want: errs.ErrDatabaseRequired},
-		{name: "database before source conflict", opts: migrate.Options{Path: "missing", FS: fstest.MapFS{}}, want: errs.ErrDatabaseRequired},
+		{name: "database before valid filesystem", opts: migrate.Options{FS: fstest.MapFS{}}, want: errs.ErrDatabaseRequired},
 		{name: "database before filesystem validation", opts: migrate.Options{FS: fstest.MapFS{".": {}}}, want: errs.ErrDatabaseRequired},
-		{name: "missing source", opts: migrate.Options{DB: new(sql.DB)}, want: errs.ErrPathRequired},
-		{name: "source conflict before discovery", opts: migrate.Options{DB: new(sql.DB), Path: "missing", FS: fstest.MapFS{}}, want: errs.ErrMigrationsSourceConflict},
+		{name: "missing filesystem", opts: migrate.Options{DB: new(sql.DB)}, want: fs.ErrInvalid},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := migrate.Run(t.Context(), test.opts); !errors.Is(err, test.want) {
@@ -41,7 +47,7 @@ func TestRunInvalidDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{file, filepath.Join(dir, "missing")} {
-		err := migrate.Run(t.Context(), migrate.Options{DB: new(sql.DB), Path: path})
+		err := migrate.Run(t.Context(), migrate.Options{DB: new(sql.DB), FS: os.DirFS(path)})
 		var pathErr *os.PathError
 		if !errors.As(err, &pathErr) {
 			t.Fatalf("Run(%q) error = %v, want filesystem error before database access", path, err)
@@ -53,10 +59,8 @@ func TestRunInvalidFilesBeforeDatabaseAccess(t *testing.T) {
 	dir := t.TempDir()
 	writeMigration(t, dir, "0001_valid.sql")
 	writeMigration(t, dir, "invalid.sql")
-	if err := migrate.Run(t.Context(), migrate.Options{DB: new(sql.DB), Path: dir}); !errors.Is(err, errs.ErrInvalidFilename) {
-		t.Fatalf("Run error = %v, want ErrInvalidFilename before database access", err)
-	}
 	for _, source := range []fs.FS{
+		os.DirFS(dir),
 		fstest.MapFS{"0001_valid.sql": {}, "invalid.sql": {}},
 		&openOnlyFS{source: fstest.MapFS{"0001_valid.sql": {}, "invalid.sql": {}}},
 	} {
@@ -68,10 +72,7 @@ func TestRunInvalidFilesBeforeDatabaseAccess(t *testing.T) {
 
 func TestRunInvalidFSBeforeDatabaseAccess(t *testing.T) {
 	cause := &fs.PathError{Op: "open", Path: ".", Err: fs.ErrPermission}
-	for _, test := range []struct {
-		source fs.FS
-		cause  *fs.PathError
-	}{
+	for _, test := range []migrationFilesystemErrorCase{
 		{source: fstest.MapFS{".": {Data: []byte("not a directory")}}},
 		{source: &openOnlyFS{openErr: cause}, cause: cause},
 	} {

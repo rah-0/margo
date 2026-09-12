@@ -78,8 +78,9 @@ Call `runner.Run` to generate code, apply migrations, or do both. Your applicati
 needs neither a MarGO executable nor a Go toolchain at runtime. Generation still
 needs an enclosing `go.mod`; migrations alone do not.
 
-Use named fields in `runner.Options` and `migrate.Options` literals. Callers using
-positional literals must update them for the added `MigrationsFS` and `FS` fields.
+`runner.Inputs` groups the migration and custom-query filesystems. Pass embedded
+files directly, use `os.DirFS` for disk directories, or use `fs.Sub` to select a
+subdirectory. Generated output is written to the disk `OutputPath`.
 
 ### Generate code
 
@@ -89,6 +90,7 @@ database connections; the port defaults to `3306`.
 ```go
 import (
     "context"
+    "os"
 
     "github.com/rah-0/margo/runner"
     "github.com/rah-0/margo/structs"
@@ -102,8 +104,10 @@ func generate(ctx context.Context, password string) error {
             Host:     "127.0.0.1",
             Database: "app",
         },
-        OutputPath:  "./generated",
-        QueriesPath: "./queries", // Omit when no custom queries are needed.
+        OutputPath: "./generated",
+        Inputs: runner.Inputs{
+            Queries: os.DirFS("./queries"), // Omit when no custom queries are needed.
+        },
     })
 }
 ```
@@ -114,20 +118,24 @@ Using your connection settings, migrate without generating output:
 
 ```go
 err := runner.Run(ctx, runner.Options{
-    Connection:     connection,
-    MigrationsPath: "./migrations",
+    Connection: connection,
+    Inputs: runner.Inputs{
+        Migrations: os.DirFS("./migrations"),
+    },
 })
 ```
 
 MarGO creates the configured database if it is missing. To generate code from
-the migrated schema, add output and optional query paths:
+the migrated schema, add an output path and optional query input:
 
 ```go
 err := runner.Run(ctx, runner.Options{
-    Connection:     connection,
-    MigrationsPath: "./migrations",
-    OutputPath:     "./generated",
-    QueriesPath:    "./queries",
+    Connection: connection,
+    OutputPath: "./generated",
+    Inputs: runner.Inputs{
+        Migrations: os.DirFS("./migrations"),
+        Queries:    os.DirFS("./queries"),
+    },
 })
 ```
 
@@ -137,9 +145,11 @@ Pass your application's `*sql.DB` through `DB`:
 
 ```go
 err := runner.Run(ctx, runner.Options{
-    DB:             database,
-    MigrationsPath: "./migrations",
-    OutputPath:     "./generated",
+    DB:         database,
+    OutputPath: "./generated",
+    Inputs: runner.Inputs{
+        Migrations: os.DirFS("./migrations"),
+    },
 })
 ```
 
@@ -173,8 +183,10 @@ Import that package in your application and pass its filesystem to `runner.Run`:
 
 ```go
 err := runner.Run(ctx, runner.Options{
-    Connection:   connection,
-    MigrationsFS: migrations.Files,
+    Connection: connection,
+    Inputs: runner.Inputs{
+        Migrations: migrations.Files,
+    },
 })
 ```
 
@@ -206,25 +218,25 @@ if err != nil {
 }
 
 return runner.Run(ctx, runner.Options{
-    Connection:   connection,
-    MigrationsFS: source,
+    Connection: connection,
+    Inputs: runner.Inputs{
+        Migrations: source,
+    },
 })
 ```
 
-Choose exactly one migration source: `MigrationsPath` or `MigrationsFS` for
-`runner.Run`, and `Path` or `FS` for `migrate.Run`. Supplying both returns
-`errs.ErrMigrationsSourceConflict` before database or output work. With neither,
-`runner.Run` disables migrations; direct `migrate.Run` requires a source and
-returns `errs.ErrPathRequired` when its database pool is valid. An accessible,
-empty filesystem root is valid and enables migrations.
+`Inputs.Migrations` enables migrations when non-nil. An accessible, empty root
+is valid and still enables migrations. A nil input disables migrations in
+`runner.Run`; direct `migrate.Run` requires a non-nil `FS`. Use
+`os.DirFS("./migrations")` to supply files from a disk directory.
 
 MarGO accepts any `fs.FS`, reads it synchronously, and closes the file handles it
 opens. The caller retains ownership and must keep the source valid and stable
 throughout the call. Context cancellation is checked between operations and
 during SQL execution; it cannot interrupt a blocking filesystem operation.
 
-Existing disk paths and CLI flags remain supported. Query loading and generated
-output remain path-based through `QueriesPath` and `OutputPath`.
+The CLI accepts a disk directory through `-migrationsPath`. Custom queries use
+their own [filesystem input](#embed-custom-queries).
 
 ## Migrations
 
@@ -397,10 +409,10 @@ settings. `NewTx()` and `NewTxOpts(opts)` are available without a context.
 
 ## Custom SQL
 
-Pass `-queriesPath=./queries` and put one query in each `.sql` file directly
-inside that directory. Use UpperCamelCase filenames: the filename becomes the
-function name, prefixed with `Query` or `Exec`. List columns explicitly;
-`SELECT *` is rejected.
+Pass `-queriesPath=./queries`, or set `Inputs.Queries` when calling MarGO from Go.
+Put one query in each `.sql` file directly inside the source
+directory. Use UpperCamelCase filenames: the filename becomes the function name,
+prefixed with `Query` or `Exec`. List columns explicitly; `SELECT *` is rejected.
 
 For example, `queries/GetUserById.sql`:
 
@@ -425,6 +437,82 @@ if result.Exists {
     fmt.Println(result.Entity.Name)
 }
 ```
+
+Custom SQL is included in the generated Go code. Applications running those
+bindings need neither the original `.sql` files nor a query filesystem at
+runtime. Automatic CRUD operations are generated from the database schema and
+require no custom query files.
+
+### Embed custom queries
+
+Put `embed.go` beside the SQL files in a query package:
+
+```text
+queries/
+├── embed.go
+└── GetUserById.sql
+```
+
+```go
+package queries
+
+import "embed"
+
+//go:embed *.sql
+var Files embed.FS
+```
+
+Import that package and pass its filesystem directly to the runner:
+
+```go
+err := runner.Run(ctx, runner.Options{
+    Connection: connection,
+    OutputPath: "./generated",
+    Inputs: runner.Inputs{
+        Queries: queries.Files,
+    },
+})
+```
+
+Migrations and queries can each use their own embedded filesystem:
+
+```go
+err := runner.Run(ctx, runner.Options{
+    Connection: connection,
+    OutputPath: "./generated",
+    Inputs: runner.Inputs{
+        Migrations: migrations.Files,
+        Queries:    queries.Files,
+    },
+})
+```
+
+MarGO applies migrations before generating bindings, so mapped custom queries
+use the migrated schema. General and `MapAs` queries use the same SQL tags and
+parsing rules for disk and embedded inputs.
+
+`Inputs.Queries` represents the query directory itself: MarGO reads its `"."`
+root and direct SQL children without extraction. Use `fs.Sub(files, "_Queries")`
+to select an embedded subdirectory, check its error, and pass the returned
+source as `Inputs.Queries`. Use `os.DirFS("./queries")` for a disk directory.
+An accessible, empty root is valid and adds no custom queries.
+
+A non-nil query input requires an `OutputPath` inside a Go module, including an
+empty filesystem. With a nil query input, generation produces the automatic
+CRUD bindings without custom queries. Query and migration inputs are independent:
+each can use embedded files or a disk directory.
+
+The caller retains ownership of the input and must keep it valid and stable
+throughout generation. MarGO only reads the filesystem and closes handles it
+opens. A blocking filesystem operation cannot be interrupted by context
+cancellation.
+
+To load queries independently, call `query.Load(ctx, source)` from
+`github.com/rah-0/margo/query`. It returns parsed general and table-mapped queries
+as `[]structs.NamedQuery`. Direct users of `template.Renderer` pass those values
+to `CreateGoFileQueries(tableNames, queries)`; rendering does not read SQL files.
+The CLI accepts a disk directory through `-queriesPath`. Generated files are
+written to the disk `OutputPath`.
 
 ### SQL tags
 

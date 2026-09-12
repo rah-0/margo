@@ -25,16 +25,21 @@ type Options struct {
 	// OutputPath enables generation and must have an enclosing go.mod. Missing
 	// directories are created only after migrations succeed.
 	OutputPath string
-	// QueriesPath contains named SQL query files and requires OutputPath.
-	QueriesPath string
-	// MigrationsPath contains numbered SQL migrations to apply before generation.
-	// It is mutually exclusive with MigrationsFS.
-	MigrationsPath string
-	// MigrationsFS contains numbered SQL migrations directly in its root (".").
-	// Use fs.Sub for a subdirectory. A non-nil FS enables migrations even when
-	// empty. The caller keeps it valid and stable throughout Run and retains
-	// ownership; MarGO only reads it.
-	MigrationsFS fs.FS
+	// Inputs selects the read-only filesystems used by this run.
+	Inputs Inputs
+}
+
+// Inputs contains SQL sources rooted at their migration or query directory.
+// Use os.DirFS for disk directories or fs.Sub to select a filesystem subdirectory.
+// The caller keeps sources valid and stable throughout Run and retains ownership.
+// MarGO reads direct children of "." and closes the file handles it opens.
+type Inputs struct {
+	// Migrations enables numbered SQL migrations before generation. A non-nil
+	// filesystem enables migrations even when its root directory is empty.
+	Migrations fs.FS
+	// Queries contains custom and named SQL files. A non-nil filesystem requires
+	// OutputPath even when its root directory is empty.
+	Queries fs.FS
 }
 
 type connectionField struct {
@@ -42,20 +47,36 @@ type connectionField struct {
 	value string
 }
 
+type filesystemInput struct {
+	name   string
+	source fs.FS
+}
+
 func (opts Options) validate(ctx context.Context) error {
-	if opts.MigrationsPath != "" && opts.MigrationsFS != nil {
-		return errs.ErrMigrationsSourceConflict
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := conf.ValidatePaths(opts.OutputPath, opts.QueriesPath, opts.MigrationsPath); err != nil {
+	if opts.Inputs.Queries != nil && opts.OutputPath == "" {
+		return errs.ErrQueriesWithoutOutput
+	}
+	if err := conf.ValidateOutputPath(opts.OutputPath); err != nil {
 		return err
 	}
-	if opts.MigrationsFS != nil {
-		if _, err := fs.ReadDir(opts.MigrationsFS, "."); err != nil {
-			return fmt.Errorf("read migrations filesystem root: %w", err)
+	for _, input := range []filesystemInput{
+		{"queries", opts.Inputs.Queries},
+		{"migrations", opts.Inputs.Migrations},
+	} {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		if input.source != nil {
+			if _, err := fs.ReadDir(input.source, "."); err != nil {
+				return fmt.Errorf("read %s filesystem root: %w", input.name, err)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if opts.DB != nil && opts.Connection != nil {
 		return errs.ErrConnectionConflict

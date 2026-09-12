@@ -31,14 +31,6 @@ func WriteGoFile(path string, content string) error {
 	return nil
 }
 
-func ReadFileAsString(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 func GetGoModuleImportPath(outputPath string) (string, error) {
 	curr := filepath.Clean(outputPath)
 
@@ -76,25 +68,4 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 	}
 
 	return "", fmt.Errorf("%w of %q", errs.ErrGoModuleNotFound, outputPath)
-}
-
-// GetSQLFilesInDir returns all .sql file paths in the given directory.
-// It only returns direct descendants (non-recursive).
-func GetSQLFilesInDir(dirPath string) ([]string, error) {
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return nil, fmt.Errorf("read SQL directory %q: %w", dirPath, err)
-	}
-
-	var sqlFiles []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if strings.HasSuffix(strings.ToLower(entry.Name()), ".sql") {
-			sqlFiles = append(sqlFiles, filepath.Join(dirPath, entry.Name()))
-		}
-	}
-
-	return sqlFiles, nil
 }

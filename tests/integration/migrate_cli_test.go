@@ -18,6 +18,15 @@ import (
 	"github.com/rah-0/margo/structs"
 )
 
+type migrationCLIFailureCase struct {
+	name         string
+	files        map[string]string
+	wantError    string
+	createdTable string
+	missingTable string
+	failVersion  bool
+}
+
 func TestMigrationCLI(t *testing.T) {
 	database := StartMariaDB(t)
 	binary := filepath.Join(t.TempDir(), "margo")
@@ -174,14 +183,7 @@ SELECT id, name, email FROM users WHERE id = ?;
 		}
 	})
 
-	for _, test := range []struct {
-		name         string
-		files        map[string]string
-		wantError    string
-		createdTable string
-		missingTable string
-		failVersion  bool
-	}{
+	for _, test := range []migrationCLIFailureCase{
 		{
 			name: "SQL failure",
 			files: map[string]string{

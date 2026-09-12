@@ -9,6 +9,12 @@ import (
 	"github.com/rah-0/margo/errs"
 )
 
+type directoryInput struct {
+	path    string
+	invalid error
+	notDir  error
+}
+
 // ValidatePaths validates operation paths without creating directories or
 // changing the supplied paths. Empty paths disable their respective operations.
 func ValidatePaths(outputPath, queriesPath, migrationsPath string) error {
@@ -16,15 +22,11 @@ func ValidatePaths(outputPath, queriesPath, migrationsPath string) error {
 		return errs.ErrQueriesWithoutOutput
 	}
 	if outputPath != "" {
-		if err := validateOutputPath(outputPath); err != nil {
+		if err := ValidateOutputPath(outputPath); err != nil {
 			return err
 		}
 	}
-	for _, input := range []struct {
-		path    string
-		invalid error
-		notDir  error
-	}{
+	for _, input := range []directoryInput{
 		{queriesPath, errs.ErrQueriesPathInvalid, errs.ErrQueriesPathNotDir},
 		{migrationsPath, errs.ErrMigrationsPathInvalid, errs.ErrMigrationsPathNotDir},
 	} {
@@ -42,10 +44,14 @@ func ValidatePaths(outputPath, queriesPath, migrationsPath string) error {
 	return nil
 }
 
-// validateOutputPath checks existing ancestors without creating directories.
+// ValidateOutputPath checks existing ancestors without creating directories.
+// An empty path disables output and is valid.
 // Preserve the supplied path: cleaning "file/../output" would hide an invalid
 // component, and cleaning "link/../output" could change its destination.
-func validateOutputPath(outputPath string) error {
+func ValidateOutputPath(outputPath string) error {
+	if outputPath == "" {
+		return nil
+	}
 	path := outputPath
 	for {
 		info, err := os.Stat(path)

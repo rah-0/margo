@@ -1,74 +1,41 @@
 package template
 
 import (
-	"encoding/base64"
 	"fmt"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
-	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/structs"
 	"github.com/rah-0/margo/util"
 )
 
-var selectStarRegex = regexp.MustCompile(`(?i)select\s*\*`)
-
-func (r Renderer) CreateGoFileQueries(tns []string) ([]structs.NamedQuery, error) {
+// CreateGoFileQueries renders general queries and returns queries mapped to tables.
+// Queries must already be loaded and parsed. The input slice is not modified.
+func (r Renderer) CreateGoFileQueries(tns []string, queries []structs.NamedQuery) ([]structs.NamedQuery, error) {
 	pathModuleOutput, err := util.GetGoModuleImportPath(r.OutputPath)
 	if err != nil {
-		return []structs.NamedQuery{}, fmt.Errorf("resolve output module %q: %w", r.OutputPath, err)
+		return nil, fmt.Errorf("resolve output module %q: %w", r.OutputPath, err)
 	}
 	pathModuleOutput = path.Join(pathModuleOutput, db.NormalizeString(r.DBName))
 
-	var (
-		nqsGeneral       []structs.NamedQuery
-		nqsTableSpecific []structs.NamedQuery
-	)
-
-	// Only process queries if a queries path is provided
-	if r.QueriesPath != "" {
-		// Read all .sql files from directory
-		sqlFiles, err := util.GetSQLFilesInDir(r.QueriesPath)
-		if err != nil {
-			return []structs.NamedQuery{}, fmt.Errorf("read queries directory %q: %w", r.QueriesPath, err)
-		}
-
-		for _, sqlFile := range sqlFiles {
-			content, err := util.ReadFileAsString(sqlFile)
-			if err != nil {
-				return []structs.NamedQuery{}, fmt.Errorf("read query file %q: %w", sqlFile, err)
-			}
-			if err = CheckNoSelectStar([]string{content}); err != nil {
-				return []structs.NamedQuery{}, fmt.Errorf("validate query file %q: %w", sqlFile, err)
-			}
-
-			// Extract query name from filename (without .sql extension)
-			baseName := filepath.Base(sqlFile)
-			queryName := strings.TrimSuffix(baseName, filepath.Ext(baseName))
-
-			// Extract query with name from filename
-			nq := ExtractNamedQuery(content, queryName)
-			if nq.MapAs == "" {
-				nqsGeneral = append(nqsGeneral, nq)
-			} else {
-				nqsTableSpecific = append(nqsTableSpecific, nq)
-			}
+	var general, mapped []structs.NamedQuery
+	for _, nq := range queries {
+		if nq.MapAs == "" {
+			general = append(general, nq)
+		} else {
+			mapped = append(mapped, nq)
 		}
 	}
-
 	if err := r.createGoFileErrors(); err != nil {
 		return nil, fmt.Errorf("create shared errors file: %w", err)
 	}
 
-	// Always generate queries.go, even with no custom queries
 	p := filepath.Join(r.OutputPath, db.NormalizeString(r.DBName), "queries.go")
-	c := r.GetFileContentQueries(pathModuleOutput, tns, nqsGeneral)
-
-	return nqsTableSpecific, util.WriteGoFile(p, c)
+	content := r.GetFileContentQueries(pathModuleOutput, tns, general)
+	return mapped, util.WriteGoFile(p, content)
 }
 
 func (r Renderer) GetFileContentQueries(pathModuleOutput string, tns []string, nqs []structs.NamedQuery) string {
@@ -114,73 +81,6 @@ func getImportsQueries(pathModuleOutput string, tns []string, nqs []structs.Name
 	}
 	imports += ")\n\n"
 	return imports
-}
-
-func StripSQLComments(s string) string {
-	var out strings.Builder
-	inSingleQuote, inDoubleQuote := false, false
-	inLineComment, inBlockComment := false, false
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		next := byte(0)
-		if i+1 < len(s) {
-			next = s[i+1]
-		}
-
-		// Start of line comment --
-		if !inSingleQuote && !inDoubleQuote && !inBlockComment && c == '-' && next == '-' {
-			inLineComment = true
-			i++ // Skip next '-'
-			continue
-		}
-		// End of line comment
-		if inLineComment {
-			if c == '\n' {
-				inLineComment = false
-				out.WriteByte(c)
-			}
-			continue
-		}
-
-		// Start of block comment /*
-		if !inSingleQuote && !inDoubleQuote && !inLineComment && c == '/' && next == '*' {
-			inBlockComment = true
-			i++ // Skip next '*'
-			continue
-		}
-		// End of block comment */
-		if inBlockComment {
-			if c == '*' && next == '/' {
-				inBlockComment = false
-				i++ // Skip next '/'
-			}
-			continue
-		}
-
-		// Handle quoted strings (with escape)
-		if !inLineComment && !inBlockComment {
-			if c == '\'' && !inDoubleQuote {
-				// Check for escaped single quote
-				if inSingleQuote && i+1 < len(s) && s[i+1] == '\'' {
-					out.WriteByte(c)
-					i++ // Skip escaped quote
-				} else {
-					inSingleQuote = !inSingleQuote
-				}
-			} else if c == '"' && !inSingleQuote {
-				// Check for escaped double quote
-				if inDoubleQuote && i+1 < len(s) && s[i+1] == '"' {
-					out.WriteByte(c)
-					i++ // Skip escaped quote
-				} else {
-					inDoubleQuote = !inDoubleQuote
-				}
-			}
-			out.WriteByte(c)
-		}
-	}
-	return out.String()
 }
 
 func GetVarsQueries(nqs []structs.NamedQuery) string {
@@ -278,16 +178,6 @@ func GetGeneralFunctionsQueries(tns []string, hasCustomQueries bool) string {
 	t += "}\n\n"
 
 	return t
-}
-
-func CheckNoSelectStar(queries []string) error {
-	for i, q := range queries {
-		normalized := strings.Join(strings.Fields(q), " ")
-		if selectStarRegex.MatchString(normalized) {
-			return fmt.Errorf("%w (index %d)", errs.ErrSelectStarNotAllowed, i)
-		}
-	}
-	return nil
 }
 
 func GetDBFunctionsQueries(nqs []structs.NamedQuery) string {
@@ -547,57 +437,4 @@ func GetStructsQueries(hasCustomQueries bool) string {
 	t += "}\n\n"
 
 	return t
-}
-
-func ExtractNamedQuery(content string, name string) structs.NamedQuery {
-	var (
-		params, returns []string
-		mode            = conf.ResultModeMany
-		cleanLines      []string
-		mapAs           string
-	)
-
-	for _, line := range strings.Split(content, "\n") {
-		trim := strings.TrimSpace(line)
-
-		if v, ok := util.TrimPrefixCase(trim, "-- Params:"); ok {
-			if v != "" {
-				params = strings.Fields(v)
-			}
-			continue
-		}
-		if v, ok := util.TrimPrefixCase(trim, "-- Returns:"); ok {
-			if v != "" {
-				returns = strings.Fields(v)
-			}
-			continue
-		}
-		if v, ok := util.TrimPrefixCase(trim, "-- MapAs:"); ok {
-			if v != "" {
-				mapAs = v
-			}
-			continue
-		}
-		if v, ok := util.TrimPrefixCase(trim, "-- ResultMode:"); ok {
-			mode = util.ParseResultMode(v)
-			continue
-		}
-		// ignore other comment lines
-		if strings.HasPrefix(trim, "--") || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		cleanLines = append(cleanLines, line)
-	}
-
-	clean := strings.TrimSpace(StripSQLComments(strings.Join(cleanLines, "\n")))
-
-	return structs.NamedQuery{
-		Name:         name,
-		Query:        clean,
-		QueryEncoded: base64.StdEncoding.EncodeToString([]byte(clean)),
-		Params:       params,
-		Returns:      returns,
-		Mode:         mode, // "many" | "one" | "exec"
-		MapAs:        mapAs,
-	}
 }

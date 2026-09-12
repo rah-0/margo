@@ -16,6 +16,14 @@ import (
 	"github.com/rah-0/margo/migrate"
 )
 
+type pendingMigrationsCase struct {
+	name     string
+	current  uint64
+	versions []uint64
+	want     []uint64
+	missing  uint64
+}
+
 func TestDiscover(t *testing.T) {
 	files := fstest.MapFS{
 		"0010_Ten.sql":           {Data: []byte("DO 0;")},
@@ -25,15 +33,15 @@ func TestDiscover(t *testing.T) {
 		"notes.txt":              {},
 		"nested.sql/invalid.sql": {},
 	}
-	forDiscoverySources(t, files, func(t *testing.T, discover func() ([]migrate.Migration, error), path func(string) string) {
-		migrations, err := discover()
+	forDiscoverySources(t, files, func(t *testing.T, source fs.FS) {
+		migrations, err := migrate.Discover(source)
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := []migrate.Migration{
-			{Version: 1, Path: path("1_first.sql")},
-			{Version: 2, Path: path("0002_two-parts.sql")},
-			{Version: 10, Path: path("0010_Ten.sql")},
+			{Version: 1, Path: "1_first.sql"},
+			{Version: 2, Path: "0002_two-parts.sql"},
+			{Version: 10, Path: "0010_Ten.sql"},
 		}
 		if !slices.Equal(migrations, want) {
 			t.Fatalf("migrations = %v, want %v", migrations, want)
@@ -51,10 +59,10 @@ func TestDiscoverInvalidFilename(t *testing.T) {
 		"18446744073709551616_overflow.sql",
 	} {
 		t.Run(name, func(t *testing.T) {
-			forDiscoverySources(t, fstest.MapFS{name: {}}, func(t *testing.T, discover func() ([]migrate.Migration, error), path func(string) string) {
-				_, err := discover()
-				if !errors.Is(err, errs.ErrInvalidFilename) || !strings.Contains(err.Error(), path(name)) {
-					t.Fatalf("discover error = %v, want ErrInvalidFilename naming %q", err, path(name))
+			forDiscoverySources(t, fstest.MapFS{name: {}}, func(t *testing.T, source fs.FS) {
+				_, err := migrate.Discover(source)
+				if !errors.Is(err, errs.ErrInvalidFilename) || !strings.Contains(err.Error(), name) {
+					t.Fatalf("discover error = %v, want ErrInvalidFilename naming %q", err, name)
 				}
 			})
 		})
@@ -63,9 +71,9 @@ func TestDiscoverInvalidFilename(t *testing.T) {
 
 func TestDiscoverDuplicateVersion(t *testing.T) {
 	files := fstest.MapFS{"0001_first.sql": {}, "1_second.sql": {}}
-	forDiscoverySources(t, files, func(t *testing.T, discover func() ([]migrate.Migration, error), path func(string) string) {
-		_, err := discover()
-		if !errors.Is(err, errs.ErrDuplicateVersion) || !strings.Contains(err.Error(), path("0001_first.sql")) || !strings.Contains(err.Error(), path("1_second.sql")) {
+	forDiscoverySources(t, files, func(t *testing.T, source fs.FS) {
+		_, err := migrate.Discover(source)
+		if !errors.Is(err, errs.ErrDuplicateVersion) || !strings.Contains(err.Error(), "0001_first.sql") || !strings.Contains(err.Error(), "1_second.sql") {
 			t.Fatalf("discover error = %v, want ErrDuplicateVersion naming both migrations", err)
 		}
 	})
@@ -73,8 +81,8 @@ func TestDiscoverDuplicateVersion(t *testing.T) {
 
 func TestDiscoverVersionBounds(t *testing.T) {
 	files := fstest.MapFS{"00000000000000000000000000001_first.sql": {}, "18446744073709551615_last.sql": {}}
-	forDiscoverySources(t, files, func(t *testing.T, discover func() ([]migrate.Migration, error), _ func(string) string) {
-		migrations, err := discover()
+	forDiscoverySources(t, files, func(t *testing.T, source fs.FS) {
+		migrations, err := migrate.Discover(source)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,8 +93,8 @@ func TestDiscoverVersionBounds(t *testing.T) {
 }
 
 func TestDiscoverEmptyRoot(t *testing.T) {
-	forDiscoverySources(t, fstest.MapFS{}, func(t *testing.T, discover func() ([]migrate.Migration, error), _ func(string) string) {
-		migrations, err := discover()
+	forDiscoverySources(t, fstest.MapFS{}, func(t *testing.T, source fs.FS) {
+		migrations, err := migrate.Discover(source)
 		if err != nil || len(migrations) != 0 {
 			t.Fatalf("empty root migrations = %v, error = %v", migrations, err)
 		}
@@ -94,7 +102,7 @@ func TestDiscoverEmptyRoot(t *testing.T) {
 }
 
 // The disk fixture is independent of embedded fixtures used by integration tests.
-func forDiscoverySources(t *testing.T, files fstest.MapFS, test func(*testing.T, func() ([]migrate.Migration, error), func(string) string)) {
+func forDiscoverySources(t *testing.T, files fstest.MapFS, test func(*testing.T, fs.FS)) {
 	t.Helper()
 	t.Run("disk", func(t *testing.T) {
 		dir := t.TempDir()
@@ -107,10 +115,10 @@ func forDiscoverySources(t *testing.T, files fstest.MapFS, test func(*testing.T,
 				t.Fatal(err)
 			}
 		}
-		test(t, func() ([]migrate.Migration, error) { return migrate.Discover(dir) }, func(name string) string { return filepath.Join(dir, name) })
+		test(t, os.DirFS(dir))
 	})
 	t.Run("filesystem", func(t *testing.T) {
-		test(t, func() ([]migrate.Migration, error) { return migrate.DiscoverFS(files) }, func(name string) string { return name })
+		test(t, files)
 	})
 }
 
@@ -120,15 +128,15 @@ func TestDiscoverInvalidDirectory(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"", filepath.Join(dir, "missing"), file} {
+	for _, path := range []string{filepath.Join(dir, "missing"), file} {
 		t.Run(path, func(t *testing.T) {
-			_, err := migrate.Discover(path)
+			_, err := migrate.Discover(os.DirFS(path))
 			var pathErr *fs.PathError
-			if !errors.As(err, &pathErr) || !strings.Contains(err.Error(), path) {
-				t.Fatalf("Discover(%q) error = %v, want inspectable filesystem error with disk context", path, err)
+			if !errors.As(err, &pathErr) || pathErr.Path != "." {
+				t.Fatalf("Discover(os.DirFS(%q)) error = %v, want inspectable filesystem error", path, err)
 			}
 			if path != file && !errors.Is(err, fs.ErrNotExist) {
-				t.Fatalf("Discover(%q) error = %v, want fs.ErrNotExist", path, err)
+				t.Fatalf("Discover(os.DirFS(%q)) error = %v, want fs.ErrNotExist", path, err)
 			}
 		})
 	}
@@ -147,21 +155,15 @@ func TestDiscoverPreservesSymlinkRoot(t *testing.T) {
 	writeMigration(t, target, "0001_target.sql")
 	writeMigration(t, dir, "invalid.sql")
 	root := link + string(filepath.Separator) + ".."
-	migrations, err := migrate.Discover(root)
-	want := []migrate.Migration{{Version: 1, Path: filepath.Join(root, "0001_target.sql")}}
+	migrations, err := migrate.Discover(os.DirFS(root))
+	want := []migrate.Migration{{Version: 1, Path: "0001_target.sql"}}
 	if err != nil || !slices.Equal(migrations, want) {
-		t.Fatalf("Discover(%q) = %v, %v; want %v", root, migrations, err, want)
+		t.Fatalf("Discover(os.DirFS(%q)) = %v, %v; want %v", root, migrations, err, want)
 	}
 }
 
 func TestPendingMigrations(t *testing.T) {
-	tests := []struct {
-		name     string
-		current  uint64
-		versions []uint64
-		want     []uint64
-		missing  uint64
-	}{
+	tests := []pendingMigrationsCase{
 		{name: "fresh", versions: []uint64{1, 2, 3}, want: []uint64{1, 2, 3}},
 		{name: "newer", current: 2, versions: []uint64{1, 2, 3, 4}, want: []uint64{3, 4}},
 		{name: "historical files removed", current: 10, versions: []uint64{11, 12}, want: []uint64{11, 12}},

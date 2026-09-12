@@ -5,15 +5,23 @@ import (
 	"flag"
 	"io"
 
-	"github.com/rah-0/margo/runner"
 	"github.com/rah-0/margo/structs"
 )
 
-// ParseOptions parses one invocation using an independent flag set. Flag errors
-// and usage are written to output; connection and path validation belong to runner.Run.
-func ParseOptions(args []string, output io.Writer) (runner.Options, error) {
+// Options contains command-line settings, including disk input directories.
+type Options struct {
+	Connection     *structs.ConnectionOptions
+	OutputPath     string
+	QueriesPath    string
+	MigrationsPath string
+}
+
+// ParseOptions parses one invocation using an independent flag set.
+// Flag errors and usage are written to output. It performs no filesystem or
+// database operations.
+func ParseOptions(args []string, output io.Writer) (Options, error) {
 	connection := new(structs.ConnectionOptions)
-	opts := runner.Options{Connection: connection}
+	opts := Options{Connection: connection}
 	flags := flag.NewFlagSet("margo", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.StringVar(&connection.User, "dbUser", "", "Required")

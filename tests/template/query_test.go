@@ -1,14 +1,16 @@
 package template_test
 
 import (
-	"errors"
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/rah-0/margo/errs"
-	"github.com/rah-0/margo/template"
+	"github.com/rah-0/margo/query"
+	"github.com/rah-0/margo/structs"
 )
 
 func TestCreateGoFileQueries(t *testing.T) {
@@ -18,7 +20,7 @@ func TestCreateGoFileQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tableQueries, err := renderer.CreateGoFileQueries(tableNames)
+	tableQueries, err := renderer.CreateGoFileQueries(tableNames, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,23 +34,46 @@ func TestCreateGoFileQueries(t *testing.T) {
 	assertContextAwareStatementPreparation(t, content)
 }
 
+func TestCreateGoFileQueriesPartitionsParsedInput(t *testing.T) {
+	t.Parallel()
+	renderer := setupTemplateTest(t)
+	if err := renderer.PathCreateDBDir(); err != nil {
+		t.Fatal(err)
+	}
+	queries := []structs.NamedQuery{
+		{Name: "FindAlpha", Query: "SELECT uuid FROM alpha;", Returns: []string{"uuid"}, Mode: "many", MapAs: "alpha"},
+		{Name: "FindCount", Query: "SELECT COUNT(uuid) AS count FROM alpha;", Returns: []string{"count"}, Mode: "one"},
+		{Name: "FindBeta", Query: "SELECT uuid FROM beta;", Returns: []string{"uuid"}, Mode: "many", MapAs: "beta"},
+	}
+	for i := range queries {
+		queries[i].QueryEncoded = base64.StdEncoding.EncodeToString([]byte(queries[i].Query))
+	}
+	before := slices.Clone(queries)
+	mapped, err := renderer.CreateGoFileQueries(tableNames, queries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(mapped, []structs.NamedQuery{queries[0], queries[2]}) || !reflect.DeepEqual(queries, before) {
+		t.Fatalf("rendering changed parsed input or mapped-query order: input=%v mapped=%v", queries, mapped)
+	}
+	content, err := os.ReadFile(filepath.Join(renderer.OutputPath, "MargoTest", "queries.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "func QueryFindCount(") || strings.Contains(string(content), "func QueryFindAlpha(") || strings.Contains(string(content), "func QueryFindBeta(") {
+		t.Fatal("general output must use only the parsed queries without a table mapping")
+	}
+}
+
 func TestCreateGoFileQueriesPassesContextToNamedQueries(t *testing.T) {
 	t.Parallel()
 	renderer := setupTemplateTest(t)
 	if err := renderer.PathCreateDBDir(); err != nil {
 		t.Fatal(err)
 	}
-	queriesPath := t.TempDir()
-	if err := os.WriteFile(
-		filepath.Join(queriesPath, "FindAlpha.sql"),
-		[]byte("-- Returns: uuid\n-- ResultMode: one\nSELECT uuid FROM alpha WHERE uuid = ?\n"),
-		0o600,
-	); err != nil {
-		t.Fatalf("write named query: %v", err)
-	}
-	renderer.QueriesPath = queriesPath
+	queries := []structs.NamedQuery{query.ExtractNamedQuery("-- Returns: uuid\n-- ResultMode: one\nSELECT uuid FROM alpha WHERE uuid = ?\n", "FindAlpha")}
 
-	tableQueries, err := renderer.CreateGoFileQueries(tableNames)
+	tableQueries, err := renderer.CreateGoFileQueries(tableNames, queries)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,109 +90,16 @@ func TestCreateGoFileQueriesPassesContextToNamedQueries(t *testing.T) {
 	}
 }
 
-func TestStripSQLComments(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			"line comment at end",
-			"SELECT 1; -- comment\nSELECT 2;",
-			"SELECT 1; \nSELECT 2;",
-		},
-		{
-			"block comment inline",
-			"SELECT /* inline comment */ 1;",
-			"SELECT  1;",
-		},
-		{
-			"block comment multiline",
-			"SELECT 1; /* comment\nacross lines */ SELECT 2;",
-			"SELECT 1;  SELECT 2;",
-		},
-		{
-			"quote with double dash",
-			"SELECT '-- not a comment';",
-			"SELECT '-- not a comment';",
-		},
-		{
-			"quote with /* block */",
-			`SELECT '/* not a comment */';`,
-			`SELECT '/* not a comment */';`,
-		},
-		{
-			"nested quotes and comments",
-			`SELECT "abc"; -- comment`,
-			`SELECT "abc"; `,
-		},
-		{
-			"comment between queries",
-			"SELECT 1; -- comment\n-- another\nSELECT 2;",
-			"SELECT 1; \n\nSELECT 2;",
-		},
-		{
-			"only comment",
-			"-- full comment line\n",
-			"\n",
-		},
-		{
-			"no comments",
-			"SELECT 1; SELECT 2;",
-			"SELECT 1; SELECT 2;",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := template.StripSQLComments(tt.input)
-			if got != tt.expected {
-				t.Errorf("expected:\n%q\ngot:\n%q", tt.expected, got)
-			}
-		})
-	}
-}
-
-func TestCheckNoSelectStar_Allowed(t *testing.T) {
-	tests := []string{
-		"SELECT id, name FROM users",
-		"select count(*) from logs",
-		"SELECT a.* FROM table a",
-		"SELECT\nname\nFROM customers",
-	}
-
-	if err := template.CheckNoSelectStar(tests); err != nil {
-		t.Errorf("Expected no error, got: %v", err)
-	}
-}
-
-func TestCheckNoSelectStar_Disallowed(t *testing.T) {
-	tests := [][]string{
-		{"SELECT * FROM users"},
-		{"select\n* from products"},
-		{"Select     *     from items"},
-	}
-
-	for i, qset := range tests {
-		if err := template.CheckNoSelectStar(qset); !errors.Is(err, errs.ErrSelectStarNotAllowed) || !strings.Contains(err.Error(), "index 0") {
-			t.Errorf("test %d: expected SELECT * validation error for query 0, got %v", i, err)
-		}
-	}
-}
-
 func TestCreateGoFileQueriesWithoutReturns(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"one", "many"} {
 		t.Run(mode, func(t *testing.T) {
 			renderer := setupTemplateTest(t)
-			renderer.QueriesPath = t.TempDir()
-			if err := os.WriteFile(filepath.Join(renderer.QueriesPath, "MissingReturns.sql"), []byte("-- ResultMode: "+mode+"\nSELECT 1;\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			queries := []structs.NamedQuery{query.ExtractNamedQuery("-- ResultMode: "+mode+"\nSELECT 1;\n", "MissingReturns")}
 			if err := renderer.PathCreateDBDir(); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := renderer.CreateGoFileQueries(nil); err != nil {
+			if _, err := renderer.CreateGoFileQueries(nil, queries); err != nil {
 				t.Fatal(err)
 			}
 			content, err := os.ReadFile(filepath.Join(renderer.OutputPath, "MargoTest", "queries.go"))
@@ -213,26 +145,11 @@ func TestCreateGoFileQueriesEmptySchema(t *testing.T) {
 	if err := renderer.PathCreateDBDir(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := renderer.CreateGoFileQueries(nil); err != nil {
+	if _, err := renderer.CreateGoFileQueries(nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(renderer.OutputPath, "errs", "errors.go")); err != nil {
 		t.Fatalf("empty-schema shared errors file: %v", err)
 	}
 	testGeneratedPackages(t, renderer.OutputPath)
-}
-
-func TestCreateGoFileQueriesInvalidQueryDoesNotCreateErrors(t *testing.T) {
-	t.Parallel()
-	renderer := setupTemplateTest(t)
-	renderer.QueriesPath = t.TempDir()
-	if err := os.WriteFile(filepath.Join(renderer.QueriesPath, "Invalid.sql"), []byte("SELECT * FROM alpha;\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := renderer.CreateGoFileQueries(nil); !errors.Is(err, errs.ErrSelectStarNotAllowed) {
-		t.Fatalf("expected SELECT * validation error, got %v", err)
-	}
-	if _, err := os.Stat(renderer.OutputPath); !os.IsNotExist(err) {
-		t.Fatalf("invalid query created output: %v", err)
-	}
 }

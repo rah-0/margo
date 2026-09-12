@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 
 	"github.com/rah-0/margo/errs"
 )
@@ -16,26 +14,16 @@ import (
 // retries because execution and version updates are not one atomic operation.
 // Each file must leave the original database selected, autocommit enabled, and
 // no transaction open. The dedicated connection is discarded after the run.
-// Only pending file bodies are read, unchanged, from Path or FS. Cancellation
+// Only pending file bodies are read, unchanged, from FS. Cancellation
 // is checked between operations; a blocking filesystem read cannot be interrupted.
 func Run(ctx context.Context, opts Options) (err error) {
 	if opts.DB == nil {
 		return errs.ErrDatabaseRequired
 	}
-	if opts.Path != "" && opts.FS != nil {
-		return errs.ErrMigrationsSourceConflict
-	}
-	if opts.Path == "" && opts.FS == nil {
-		return errs.ErrPathRequired
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	source := opts.FS
-	if opts.Path != "" {
-		source = os.DirFS(opts.Path)
-	}
-	migrations, err := discover(source, opts.Path)
+	migrations, err := Discover(opts.FS)
 	if err != nil {
 		return err
 	}
@@ -71,21 +59,13 @@ func Run(ctx context.Context, opts Options) (err error) {
 	}
 	pending, err := PendingMigrations(migrations, current)
 	if err != nil {
-		if opts.Path != "" {
-			return fmt.Errorf("migrate directory %q: %w", opts.Path, err)
-		}
 		return err
 	}
 	for _, migration := range pending {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		filename := migration.Path
-		if opts.Path != "" {
-			// Keep the disk path for diagnostics separate from the FS lookup name.
-			migration.Path = filepath.Join(opts.Path, filename)
-		}
-		content, err := fs.ReadFile(source, filename)
+		content, err := fs.ReadFile(opts.FS, migration.Path)
 		if err != nil {
 			return fmt.Errorf("%w: read %q (version %d): %w", errs.ErrMigrationFailed, migration.Path, migration.Version, err)
 		}
