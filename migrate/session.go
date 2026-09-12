@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/rah-0/margo/errs"
 )
 
 func validateSession(ctx context.Context, conn *sql.Conn, expectedDatabase string) (string, error) {
@@ -15,14 +17,14 @@ func validateSession(ctx context.Context, conn *sql.Conn, expectedDatabase strin
 		return "", fmt.Errorf("migrate: read session state: %w", err)
 	}
 	if !database.Valid || database.String == "" {
-		return "", fmt.Errorf("%w: %w", ErrInvalidSessionState, ErrDatabaseNotSelected)
+		return "", fmt.Errorf("%w: %w", errs.ErrInvalidSessionState, errs.ErrDatabaseNotSelected)
 	}
 	if expectedDatabase != "" && database.String != expectedDatabase {
-		return "", fmt.Errorf("%w: expected database %q, got %q", ErrInvalidSessionState, expectedDatabase, database.String)
+		return "", fmt.Errorf("%w: expected database %q, got %q", errs.ErrInvalidSessionState, expectedDatabase, database.String)
 	}
 	if !autocommit || inTransaction {
 		return "", fmt.Errorf("%w: require autocommit enabled and no open transaction (autocommit=%t, in_transaction=%t)",
-			ErrInvalidSessionState, autocommit, inTransaction)
+			errs.ErrInvalidSessionState, autocommit, inTransaction)
 	}
 	return database.String, nil
 }

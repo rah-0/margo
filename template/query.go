@@ -3,44 +3,47 @@ package template
 import (
 	"encoding/base64"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
+	"github.com/rah-0/margo/errs"
+	"github.com/rah-0/margo/structs"
 	"github.com/rah-0/margo/util"
 )
 
 var selectStarRegex = regexp.MustCompile(`(?i)select\s*\*`)
 
-func CreateGoFileQueries(tns []string) ([]conf.NamedQuery, error) {
-	pathModuleOutput, err := util.GetGoModuleImportPath(conf.Args.OutputPath)
+func (r Renderer) CreateGoFileQueries(tns []string) ([]structs.NamedQuery, error) {
+	pathModuleOutput, err := util.GetGoModuleImportPath(r.OutputPath)
 	if err != nil {
-		return []conf.NamedQuery{}, fmt.Errorf("resolve output module %q: %w", conf.Args.OutputPath, err)
+		return []structs.NamedQuery{}, fmt.Errorf("resolve output module %q: %w", r.OutputPath, err)
 	}
-	pathModuleOutput = filepath.Join(pathModuleOutput, db.NormalizeString(conf.Args.DBName))
+	pathModuleOutput = path.Join(pathModuleOutput, db.NormalizeString(r.DBName))
 
 	var (
-		nqsGeneral       []conf.NamedQuery
-		nqsTableSpecific []conf.NamedQuery
+		nqsGeneral       []structs.NamedQuery
+		nqsTableSpecific []structs.NamedQuery
 	)
 
 	// Only process queries if a queries path is provided
-	if conf.Args.QueriesPath != "" {
+	if r.QueriesPath != "" {
 		// Read all .sql files from directory
-		sqlFiles, err := util.GetSQLFilesInDir(conf.Args.QueriesPath)
+		sqlFiles, err := util.GetSQLFilesInDir(r.QueriesPath)
 		if err != nil {
-			return []conf.NamedQuery{}, fmt.Errorf("read queries directory %q: %w", conf.Args.QueriesPath, err)
+			return []structs.NamedQuery{}, fmt.Errorf("read queries directory %q: %w", r.QueriesPath, err)
 		}
 
 		for _, sqlFile := range sqlFiles {
 			content, err := util.ReadFileAsString(sqlFile)
 			if err != nil {
-				return []conf.NamedQuery{}, fmt.Errorf("read query file %q: %w", sqlFile, err)
+				return []structs.NamedQuery{}, fmt.Errorf("read query file %q: %w", sqlFile, err)
 			}
 			if err = CheckNoSelectStar([]string{content}); err != nil {
-				return []conf.NamedQuery{}, fmt.Errorf("validate query file %q: %w", sqlFile, err)
+				return []structs.NamedQuery{}, fmt.Errorf("validate query file %q: %w", sqlFile, err)
 			}
 
 			// Extract query name from filename (without .sql extension)
@@ -57,18 +60,22 @@ func CreateGoFileQueries(tns []string) ([]conf.NamedQuery, error) {
 		}
 	}
 
+	if err := r.createGoFileErrors(); err != nil {
+		return nil, fmt.Errorf("create shared errors file: %w", err)
+	}
+
 	// Always generate queries.go, even with no custom queries
-	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), "queries.go")
-	c := GetFileContentQueries(pathModuleOutput, tns, nqsGeneral)
+	p := filepath.Join(r.OutputPath, db.NormalizeString(r.DBName), "queries.go")
+	c := r.GetFileContentQueries(pathModuleOutput, tns, nqsGeneral)
 
 	return nqsTableSpecific, util.WriteGoFile(p, c)
 }
 
-func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.NamedQuery) string {
+func (r Renderer) GetFileContentQueries(pathModuleOutput string, tns []string, nqs []structs.NamedQuery) string {
 	hasCustomQueries := len(nqs) > 0
-	t := "package " + db.NormalizeString(conf.Args.DBName) + "\n\n"
+	t := "package " + db.NormalizeString(r.DBName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImportsQueries(pathModuleOutput, tns, hasCustomQueries)
+	t += getImportsQueries(pathModuleOutput, tns, nqs)
 	t += GetVarsQueries(nqs)
 	t += GetStructsQueries(hasCustomQueries)
 	t += GetGeneralFunctionsQueries(tns, hasCustomQueries)
@@ -76,17 +83,33 @@ func GetFileContentQueries(pathModuleOutput string, tns []string, nqs []conf.Nam
 	return t
 }
 
-func GetImportsQueries(pathModuleOutput string, tns []string, hasCustomQueries bool) string {
+func getImportsQueries(pathModuleOutput string, tns []string, nqs []structs.NamedQuery) string {
+	hasMissingReturns, hasSingleRowQuery := false, false
+	for _, nq := range nqs {
+		mode := strings.ToLower(nq.Mode)
+		if len(nq.Returns) == 0 && (mode == "" || mode == conf.ResultModeOne || mode == conf.ResultModeMany) {
+			hasMissingReturns = true
+		}
+		if mode == conf.ResultModeOne && len(nq.Returns) > 0 {
+			hasSingleRowQuery = true
+		}
+	}
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
-	if hasCustomQueries {
+	if len(nqs) > 0 {
 		imports += `"encoding/base64"` + "\n"
 	}
-	imports += `"errors"` + "\n"
+	if hasSingleRowQuery {
+		imports += `"errors"` + "\n"
+	}
+	if hasMissingReturns {
+		imports += `"fmt"` + "\n"
+	}
 	imports += `"sync"` + "\n\n"
+	imports += `errs "` + path.Join(path.Dir(pathModuleOutput), "errs") + `"` + "\n"
 	for _, tn := range tns {
-		pathModuleTable := filepath.Join(pathModuleOutput, db.NormalizeString(tn))
+		pathModuleTable := path.Join(pathModuleOutput, db.NormalizeString(tn))
 		imports += `"` + pathModuleTable + `"` + "\n"
 	}
 	imports += ")\n\n"
@@ -160,7 +183,7 @@ func StripSQLComments(s string) string {
 	return out.String()
 }
 
-func GetVarsQueries(nqs []conf.NamedQuery) string {
+func GetVarsQueries(nqs []structs.NamedQuery) string {
 	t := "var (\n"
 	t += "db *sql.DB\n"
 	t += "stmtMu sync.RWMutex\n"
@@ -198,25 +221,25 @@ func GetGeneralFunctionsQueries(tns []string, hasCustomQueries bool) string {
 
 	t += "func NewTx() (*sql.Tx, error) {\n"
 	t += "if db == nil {\n"
-	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += `return nil, errs.ErrDatabaseNotInitialized` + "\n"
 	t += "}\n"
 	t += "return db.Begin()\n"
 	t += "}\n\n"
 	t += "func NewCtxTx(ctx context.Context) (*sql.Tx, error) {\n"
 	t += "if db == nil {\n"
-	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += `return nil, errs.ErrDatabaseNotInitialized` + "\n"
 	t += "}\n"
 	t += "return db.BeginTx(ctx, nil)\n"
 	t += "}\n\n"
 	t += "func NewTxOpts(opts *sql.TxOptions) (*sql.Tx, error) {\n"
 	t += "if db == nil {\n"
-	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += `return nil, errs.ErrDatabaseNotInitialized` + "\n"
 	t += "}\n"
 	t += "return db.BeginTx(context.Background(), opts)\n"
 	t += "}\n\n"
 	t += "func NewCtxTxOpts(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {\n"
 	t += "if db == nil {\n"
-	t += `return nil, errors.New("db not initialized")` + "\n"
+	t += `return nil, errs.ErrDatabaseNotInitialized` + "\n"
 	t += "}\n"
 	t += "return db.BeginTx(ctx, opts)\n"
 	t += "}\n\n"
@@ -261,13 +284,13 @@ func CheckNoSelectStar(queries []string) error {
 	for i, q := range queries {
 		normalized := strings.Join(strings.Fields(q), " ")
 		if selectStarRegex.MatchString(normalized) {
-			return fmt.Errorf("SELECT * is not allowed in query %d", i)
+			return fmt.Errorf("%w (index %d)", errs.ErrSelectStarNotAllowed, i)
 		}
 	}
 	return nil
 }
 
-func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
+func GetDBFunctionsQueries(nqs []structs.NamedQuery) string {
 	t := ""
 
 	genResultStruct := func(typeName string, fields []string) string {
@@ -282,7 +305,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		return s
 	}
 
-	genCore := func(nq conf.NamedQuery, mode string, fields []string, hasParams bool, innerType string) string {
+	genCore := func(nq structs.NamedQuery, mode string, fields []string, hasParams bool, innerType string) string {
 		coreName := "query" + nq.Name
 		resType := innerType
 		if resType == "" {
@@ -295,7 +318,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		// guard: enforce Returns for query modes
 		if (mode == conf.ResultModeMany || mode == conf.ResultModeOne) && len(fields) == 0 {
 			s := "func " + coreName + "(ctx context.Context, tx *sql.Tx, params *QueryParams) " + ret + " {\n"
-			s += `qr = &Query` + nq.Name + `Result{Error: fmt.Errorf("named query ` + nq.Name + ` requires -- Returns: for ResultMode=` + mode + `")}` + "\n"
+			s += `qr = &Query` + nq.Name + `Result{Error: fmt.Errorf("named query ` + nq.Name + ` (ResultMode=` + mode + `): %w", errs.ErrMissingReturns)}` + "\n"
 			s += "return\n"
 			s += "}\n\n"
 			return s
@@ -400,7 +423,7 @@ func GetDBFunctionsQueries(nqs []conf.NamedQuery) string {
 		}
 	}
 
-	genWrappers := func(nq conf.NamedQuery, mode string, fields []string, hasParams bool) string {
+	genWrappers := func(nq structs.NamedQuery, mode string, fields []string, hasParams bool) string {
 		core := "query" + nq.Name
 		resType := "Query" + nq.Name + "Result"
 
@@ -526,7 +549,7 @@ func GetStructsQueries(hasCustomQueries bool) string {
 	return t
 }
 
-func ExtractNamedQuery(content string, name string) conf.NamedQuery {
+func ExtractNamedQuery(content string, name string) structs.NamedQuery {
 	var (
 		params, returns []string
 		mode            = conf.ResultModeMany
@@ -568,7 +591,7 @@ func ExtractNamedQuery(content string, name string) conf.NamedQuery {
 
 	clean := strings.TrimSpace(StripSQLComments(strings.Join(cleanLines, "\n")))
 
-	return conf.NamedQuery{
+	return structs.NamedQuery{
 		Name:         name,
 		Query:        clean,
 		QueryEncoded: base64.StdEncoding.EncodeToString([]byte(clean)),

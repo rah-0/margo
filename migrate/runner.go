@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/util"
 )
 
@@ -15,12 +16,12 @@ import (
 // no transaction open. The dedicated connection is discarded after the run.
 func Run(ctx context.Context, opts Options) (err error) {
 	if opts.DB == nil {
-		return ErrDatabaseRequired
+		return errs.ErrDatabaseRequired
 	}
 	if opts.Path == "" {
-		return ErrPathRequired
+		return errs.ErrPathRequired
 	}
-	migrations, err := discover(opts.Path)
+	migrations, err := Discover(opts.Path)
 	if err != nil {
 		return err
 	}
@@ -37,7 +38,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "DO 0; DO 0"); err != nil {
-		return fmt.Errorf("%w: %w", ErrMultiStatementsRequired, err)
+		return fmt.Errorf("%w: %w", errs.ErrMultiStatementsRequired, err)
 	}
 	name := lockName(database)
 	if err := acquireLock(ctx, conn, name); err != nil {
@@ -51,23 +52,23 @@ func Run(ctx context.Context, opts Options) (err error) {
 	if err != nil {
 		return err
 	}
-	pending, err := pendingMigrations(migrations, current)
+	pending, err := PendingMigrations(migrations, current)
 	if err != nil {
 		return err
 	}
 	for _, migration := range pending {
 		content, err := util.ReadFileAsString(migration.Path)
 		if err != nil {
-			return fmt.Errorf("%w: read %q (version %d): %w", ErrMigrationFailed, migration.Path, migration.Version, err)
+			return fmt.Errorf("%w: read %q (version %d): %w", errs.ErrMigrationFailed, migration.Path, migration.Version, err)
 		}
 		if _, err := conn.ExecContext(ctx, content); err != nil {
-			return fmt.Errorf("%w: execute %q (version %d): %w", ErrMigrationFailed, migration.Path, migration.Version, err)
+			return fmt.Errorf("%w: execute %q (version %d): %w", errs.ErrMigrationFailed, migration.Path, migration.Version, err)
 		}
 		if _, err := validateSession(ctx, conn, database); err != nil {
-			return fmt.Errorf("%w: validate session after %q (version %d): %w", ErrMigrationFailed, migration.Path, migration.Version, err)
+			return fmt.Errorf("%w: validate session after %q (version %d): %w", errs.ErrMigrationFailed, migration.Path, migration.Version, err)
 		}
 		if err := saveVersion(ctx, conn, current, migration.Version); err != nil {
-			return fmt.Errorf("%w: save version after %q (version %d): %w", ErrMigrationFailed, migration.Path, migration.Version, err)
+			return fmt.Errorf("%w: save version after %q (version %d): %w", errs.ErrMigrationFailed, migration.Path, migration.Version, err)
 		}
 		current = migration.Version
 	}

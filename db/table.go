@@ -5,20 +5,16 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
-	"github.com/fatih/camelcase"
-
-	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/migrate"
+	"github.com/rah-0/margo/structs"
 	"github.com/rah-0/margo/util"
 )
 
-func GetDbTables(c *sql.DB) ([]string, error) {
-	return GetDbTablesContext(context.Background(), c)
-}
-
 // GetDbTablesContext lists application tables, excluding migration metadata.
-func GetDbTablesContext(ctx context.Context, c *sql.DB) ([]string, error) {
+func GetDbTablesContext(ctx context.Context, c *sql.DB, schema string) ([]string, error) {
 	var tables []string
 
 	rows, err := c.QueryContext(ctx, `
@@ -28,7 +24,7 @@ func GetDbTablesContext(ctx context.Context, c *sql.DB) ([]string, error) {
 	  AND table_type = 'BASE TABLE'
 	  AND BINARY table_name <> ?
 	ORDER BY table_name`,
-		conf.Args.DBName,
+		schema,
 		migrate.TableName,
 	)
 	if err != nil {
@@ -52,6 +48,7 @@ func GetDbTablesContext(ctx context.Context, c *sql.DB) ([]string, error) {
 
 var separators = []rune{'_', '-', '.'}
 
+// NormalizeString normalizes database identifiers for generated names.
 func NormalizeString(input string) string {
 	// Replace all separators with " "
 	for _, sep := range separators {
@@ -69,21 +66,46 @@ func NormalizeString(input string) string {
 		return strings.Join(parts, "")
 	}
 
-	// fallback to camel case
-	parts := camelcase.Split(input)
-	for i, p := range parts {
-		parts[i] = util.Capitalize(p)
+	// Capitalize invalid UTF-8 as one word.
+	if !utf8.ValidString(input) {
+		return util.Capitalize(input)
 	}
-	return strings.Join(parts, "")
-}
 
-func GetDbTableFields(c *sql.DB, tableName string) ([]conf.TableField, error) {
-	return GetDbTableFieldsContext(context.Background(), c, tableName)
+	runes := []rune(input)
+	previousClass := runeClassOther
+	for i, r := range runes {
+		class := runeClassOther
+		switch {
+		case unicode.IsLower(r):
+			class = runeClassLower
+		case unicode.IsUpper(r):
+			class = runeClassUpper
+		case unicode.IsDigit(r):
+			class = runeClassDigit
+		}
+
+		startsWord := i == 0 || class != previousClass
+		// Keep a capital with its lowercase suffix: Server is one word.
+		if previousClass == runeClassUpper && class == runeClassLower {
+			startsWord = false
+		}
+		// The final capital in an acronym starts the next word: HTTPServer.
+		if class == runeClassUpper && i+1 < len(runes) && unicode.IsLower(runes[i+1]) {
+			startsWord = true
+		}
+		if startsWord {
+			runes[i] = unicode.ToUpper(r)
+		} else {
+			runes[i] = unicode.ToLower(r)
+		}
+		previousClass = class
+	}
+	return string(runes)
 }
 
 // GetDbTableFieldsContext reads the columns of a table with cancellation support.
-func GetDbTableFieldsContext(ctx context.Context, c *sql.DB, tableName string) ([]conf.TableField, error) {
-	var tfs []conf.TableField
+func GetDbTableFieldsContext(ctx context.Context, c *sql.DB, schema, tableName string) ([]structs.TableField, error) {
+	var tfs []structs.TableField
 	rows, err := c.QueryContext(ctx, `
 		SELECT 
 			COLUMN_NAME as columnName,
@@ -97,7 +119,7 @@ func GetDbTableFieldsContext(ctx context.Context, c *sql.DB, tableName string) (
 					table_schema = ?
 		ORDER BY 
 			ORDINAL_POSITION
-	`, tableName, conf.Args.DBName)
+	`, tableName, schema)
 	if err != nil {
 		return tfs, fmt.Errorf("query fields for table %q: %w", tableName, err)
 	}
@@ -112,7 +134,7 @@ func GetDbTableFieldsContext(ctx context.Context, c *sql.DB, tableName string) (
 			return tfs, fmt.Errorf("scan fields for table %q: %w", tableName, err)
 		}
 
-		tfs = append(tfs, conf.TableField{
+		tfs = append(tfs, structs.TableField{
 			Name:       columnName,
 			DataType:   dataType,
 			ColumnType: columnType,

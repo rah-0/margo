@@ -7,6 +7,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/rah-0/margo/errs"
 )
 
 func EnsureDir(path string) error {
@@ -56,7 +58,7 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 				}
 			}
 			if modulePath == "" {
-				return "", fmt.Errorf("%s: no module directive", goModPath)
+				return "", fmt.Errorf("%w: %q", errs.ErrModuleDirectiveNotFound, goModPath)
 			}
 			relPath, err := filepath.Rel(curr, outputPath)
 			if err != nil {
@@ -73,7 +75,7 @@ func GetGoModuleImportPath(outputPath string) (string, error) {
 		curr = parent
 	}
 
-	return "", fmt.Errorf("go.mod not found in any parent of %q", outputPath)
+	return "", fmt.Errorf("%w of %q", errs.ErrGoModuleNotFound, outputPath)
 }
 
 // GetSQLFilesInDir returns all .sql file paths in the given directory.

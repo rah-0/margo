@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/rah-0/margo/errs"
 )
 
 func initializeVersion(ctx context.Context, conn *sql.Conn) (uint64, error) {
@@ -33,7 +35,7 @@ func saveVersion(ctx context.Context, conn *sql.Conn, previous, version uint64) 
 		return err
 	}
 	if count != 1 {
-		return fmt.Errorf("expected one version row to update, got %d", count)
+		return fmt.Errorf("%w, got %d", errs.ErrVersionUpdateFailed, count)
 	}
 	return nil
 }

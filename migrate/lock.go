@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/rah-0/margo/errs"
 )
 
 func lockName(database string) string {
@@ -18,16 +20,16 @@ func lockName(database string) string {
 func acquireLock(ctx context.Context, conn *sql.Conn, name string) error {
 	var acquired sql.NullInt64
 	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 30)", name).Scan(&acquired); err != nil {
-		return fmt.Errorf("%w: %w", ErrLockFailed, err)
+		return fmt.Errorf("%w: %w", errs.ErrLockFailed, err)
 	}
 	if !acquired.Valid {
-		return ErrLockFailed
+		return errs.ErrLockFailed
 	}
 	if acquired.Int64 == 0 {
-		return ErrLockTimeout
+		return errs.ErrLockTimeout
 	}
 	if acquired.Int64 != 1 {
-		return fmt.Errorf("%w: GET_LOCK returned %d", ErrLockFailed, acquired.Int64)
+		return fmt.Errorf("%w: GET_LOCK returned %d", errs.ErrLockFailed, acquired.Int64)
 	}
 	return nil
 }
@@ -46,7 +48,9 @@ func releaseLock(conn *sql.Conn, name string) error {
 		return nil
 	}
 	if err == nil {
-		err = fmt.Errorf("RELEASE_LOCK did not confirm release")
+		err = errs.ErrLockReleaseFailed
+	} else {
+		err = fmt.Errorf("%w: %w", errs.ErrLockReleaseFailed, err)
 	}
 	return fmt.Errorf("migrate: release advisory lock: %w", err)
 }

@@ -12,33 +12,31 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
-	"github.com/rah-0/margo/conf"
+	"github.com/rah-0/margo/structs"
 )
-
-// Connect opens the configured database, creating it first when migrations are enabled.
-func Connect() (*sql.DB, error) {
-	return ConnectContext(context.Background())
-}
 
 // ConnectContext opens the configured database with cancellation support.
 // When migrations are enabled, it creates the database if missing and enables
 // whole-file SQL execution on the returned pool.
-func ConnectContext(ctx context.Context) (*sql.DB, error) {
+func ConnectContext(ctx context.Context, opts structs.ConnectionOptions, migrations bool) (*sql.DB, error) {
 	cfg := mysql.NewConfig()
-	cfg.User = conf.Args.DBUser
-	cfg.Passwd = conf.Args.DBPassword
+	// Return connection errors without the driver's default stderr logging.
+	// This applies only to owned pools; borrowed pools keep caller configuration.
+	cfg.Logger = &mysql.NopLogger{}
+	cfg.User = opts.User
+	cfg.Passwd = opts.Password
 	cfg.Net = "tcp"
-	cfg.Addr = net.JoinHostPort(conf.Args.DBIp, conf.Args.DBPort)
+	cfg.Addr = net.JoinHostPort(opts.Host, opts.Port)
 
-	if conf.Args.MigrationsPath != "" {
+	if migrations {
 		server, err := openConnection(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("connect to database server: %w", err)
 		}
-		_, createErr := server.ExecContext(ctx, "CREATE DATABASE IF NOT EXISTS `"+strings.ReplaceAll(conf.Args.DBName, "`", "``")+"`")
+		_, createErr := server.ExecContext(ctx, "CREATE DATABASE IF NOT EXISTS `"+strings.ReplaceAll(opts.Database, "`", "``")+"`")
 		closeErr := server.Close()
 		if createErr != nil {
-			createErr = fmt.Errorf("create database %q: %w", conf.Args.DBName, createErr)
+			createErr = fmt.Errorf("create database %q: %w", opts.Database, createErr)
 		}
 		if closeErr != nil {
 			closeErr = fmt.Errorf("close database server connection: %w", closeErr)
@@ -49,7 +47,7 @@ func ConnectContext(ctx context.Context) (*sql.DB, error) {
 		cfg.MultiStatements = true
 	}
 
-	cfg.DBName = conf.Args.DBName
+	cfg.DBName = opts.Database
 	return openConnection(ctx, cfg)
 }
 

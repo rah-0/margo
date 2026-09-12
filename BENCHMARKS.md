@@ -7,10 +7,12 @@ database.
 ## Running
 
 Docker must be available. The first run may also download the pinned comparison
-dependencies used by the temporary benchmark module.
+dependencies used by the temporary benchmark module. Run these commands from
+the repository root. `go -C tests` selects the nested tests module, whose local
+replace uses the parent MarGO checkout without requiring `go.work`.
 
 ```bash
-go test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 -v ./benchmark
+GOWORK=off go -C tests test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 -v ./benchmark
 ```
 
 Set `MARGO_BENCHTIME` to control the duration of each sample and
@@ -18,8 +20,8 @@ Set `MARGO_BENCHTIME` to control the duration of each sample and
 sampling configuration:
 
 ```bash
-MARGO_BENCHTIME=3s MARGO_BENCH_COUNT=5 \
-  go test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 \
+GOWORK=off GOTOOLCHAIN=go1.27.1 MARGO_BENCHTIME=3s MARGO_BENCH_COUNT=5 \
+  go -C tests test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 \
     -timeout=15m -v ./benchmark
 ```
 
@@ -30,7 +32,7 @@ nested benchmark process.
 For a quick compilation and single-iteration smoke run:
 
 ```bash
-MARGO_BENCHTIME=1x go test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 -v ./benchmark
+GOWORK=off MARGO_BENCHTIME=1x go -C tests test -tags=benchmark -run '^TestGeneratedBenchmarks$' -count=1 -v ./benchmark
 ```
 
 The harness starts MariaDB, applies the integration schema, generates the
@@ -38,37 +40,48 @@ current MarGO packages, generates the Ent comparator from its schema, runs the
 benchmarks with allocation reporting, and removes the temporary module and
 container.
 
-## Latest Results
+## MarGO v0.4.0 results
 
 Lower is better. Each value is the median of five samples with a minimum
 benchtime of three seconds per sample. `vs raw` divides the implementation's
 median time by the raw SQL median for the same operation; small differences
 should not be treated as statistically significant.
 
-**Run:** 2026-08-31 · Go 1.27.0 · linux/amd64 · AMD Ryzen 9 5900HX (16 logical
-CPUs) · MariaDB 12.3.3
+**Run:** 2026-09-12 · Go 1.27.1 · linux/amd64 · AMD Ryzen 9 5900HX (16 logical
+CPUs) · MariaDB 12.3.3 · Docker 29.7.1
 
 **Comparators:** MySQL driver 1.9.3 · Bun 1.2.14 · Ent 0.14.4 · GORM 1.30.0
 
-| Operation | Implementation | Time/op | vs raw | B/op | allocs/op |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Insert | Raw SQL | 2.358 ms | 1.00× | 648 | 18 |
-| Insert | **MarGO** | 2.442 ms | 1.04× | 1,528 | 25 |
-| Insert | Bun | 2.549 ms | 1.08× | 5,024 | 14 |
-| Insert | Ent | 2.501 ms | 1.06× | 3,313 | 73 |
-| Insert | GORM | 2.517 ms | 1.07× | 5,604 | 58 |
-| Delete | Raw SQL | 2.338 ms | 1.00× | 216 | 10 |
-| Delete | **MarGO** | 2.305 ms | 0.99× | 392 | 13 |
-| Delete | Bun | 2.323 ms | 0.99× | 4,992 | 15 |
-| Delete | Ent | 2.409 ms | 1.03× | 1,864 | 43 |
-| Delete | GORM | 2.396 ms | 1.02× | 4,122 | 45 |
-| Select | Raw SQL | 114.5 µs | 1.00× | 1,654 | 44 |
-| Select | **MarGO** | 116.6 µs | 1.02× | 2,934 | 64 |
-| Select | Bun | 130.6 µs | 1.14× | 6,455 | 45 |
-| Select | GORM | 243.6 µs | 2.13× | 6,036 | 95 |
+### Insert
 
-These values come from the suite and methodology in this repository revision.
-They are a host-specific snapshot, not a universal ranking.
+| Implementation | Time/op | vs raw | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| Raw SQL | 2.494 ms | 1.00× | 648 | 18 |
+| **MarGO** | 2.541 ms | 1.02× | 1,528 | 25 |
+| Bun | 2.431 ms | 0.97× | 5,024 | 14 |
+| Ent | 2.538 ms | 1.02× | 3,312 | 73 |
+| GORM | 2.522 ms | 1.01× | 5,602 | 58 |
+
+### Delete
+
+| Implementation | Time/op | vs raw | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| Raw SQL | 2.358 ms | 1.00× | 216 | 10 |
+| **MarGO** | 2.318 ms | 0.98× | 392 | 13 |
+| Bun | 2.334 ms | 0.99× | 4,992 | 15 |
+| Ent | 2.368 ms | 1.00× | 1,865 | 43 |
+| GORM | 2.413 ms | 1.02× | 4,120 | 45 |
+
+### Select
+
+| Implementation | Time/op | vs raw | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: |
+| Raw SQL | 114.0 µs | 1.00× | 1,653 | 44 |
+| **MarGO** | 117.6 µs | 1.03× | 2,937 | 64 |
+| Bun | 129.3 µs | 1.13× | 6,459 | 45 |
+| GORM | 241.0 µs | 2.11× | 6,040 | 95 |
+
+These results are a host-specific snapshot, not a universal ranking.
 
 ## Cases
 
@@ -81,6 +94,9 @@ They are a host-specific snapshot, not a universal ranking.
 ## Methodology
 
 - Every implementation uses the same MariaDB container and `alpha` table.
+- Schema inspection, code generation, and database initialization happen before
+  timed operations.
+- Timed benchmarks run without race or coverage instrumentation.
 - Insert timings include UUID and model construction for every implementation.
 - Delete and select fixtures are seeded outside the measured interval.
 - Select benchmarks materialize the complete row rather than checking only for

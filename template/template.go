@@ -2,29 +2,46 @@ package template
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
-	"github.com/rah-0/margo/conf"
 	"github.com/rah-0/margo/db"
+	"github.com/rah-0/margo/structs"
 	"github.com/rah-0/margo/util"
 )
 
-func CreateGoFileEntity(rawTableName string, tfs []conf.TableField, nqs []conf.NamedQuery) error {
-	p := filepath.Join(conf.Args.OutputPath, db.NormalizeString(conf.Args.DBName), db.NormalizeString(rawTableName), "entity.go")
-	c, err := GetFileContentEntity(rawTableName, tfs, nqs)
+// Renderer carries the schema and paths for one generation invocation.
+// Resolve OutputPath symlinks before creating database or table child paths.
+// Independent renderers may run concurrently with separate output directories.
+type Renderer struct {
+	DBName      string
+	OutputPath  string
+	QueriesPath string
+}
+
+func (r Renderer) CreateGoFileEntity(rawTableName string, tfs []structs.TableField, nqs []structs.NamedQuery) error {
+	p := filepath.Join(r.OutputPath, db.NormalizeString(r.DBName), db.NormalizeString(rawTableName), "entity.go")
+	c, err := r.GetFileContentEntity(rawTableName, tfs, nqs)
 	if err != nil {
 		return fmt.Errorf("generate entity for table %q: %w", rawTableName, err)
+	}
+	if err := r.createGoFileErrors(); err != nil {
+		return fmt.Errorf("create shared errors file: %w", err)
 	}
 
 	return util.WriteGoFile(p, c)
 }
 
-func GetFileContentEntity(rawTableName string, tfs []conf.TableField, nqs []conf.NamedQuery) (string, error) {
+func (r Renderer) GetFileContentEntity(rawTableName string, tfs []structs.TableField, nqs []structs.NamedQuery) (string, error) {
+	outputImportPath, err := util.GetGoModuleImportPath(r.OutputPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve output module %q: %w", r.OutputPath, err)
+	}
 	t := "package " + db.NormalizeString(rawTableName) + "\n\n"
 	t += GetCommentWarning()
-	t += GetImports(nqs)
-	t += GetConsts(rawTableName, tfs)
+	t += GetImports(outputImportPath, nqs)
+	t += r.GetConsts(rawTableName, tfs)
 	t += GetVars(tfs, nqs)
 	t += GetStruct(tfs)
 	t += GetGeneralFunctions(tfs, nqs)
@@ -42,23 +59,23 @@ func GetCommentWarning() string {
 `
 }
 
-func GetImports(nqs []conf.NamedQuery) string {
+func GetImports(outputImportPath string, nqs []structs.NamedQuery) string {
 	imports := "import (\n"
 	imports += `"context"` + "\n"
 	imports += `"database/sql"` + "\n"
 	if len(nqs) > 0 {
 		imports += `"encoding/base64"` + "\n"
 	}
-	imports += `"errors"` + "\n"
 	imports += `"strings"` + "\n"
-	imports += `"sync"` + "\n"
+	imports += `"sync"` + "\n\n"
+	imports += `errs "` + path.Join(outputImportPath, "errs") + `"` + "\n"
 	imports += ")\n\n"
 	return imports
 }
 
-func GetConsts(rawTableName string, tfs []conf.TableField) string {
+func (r Renderer) GetConsts(rawTableName string, tfs []structs.TableField) string {
 	t := "const (\n"
-	t += `FQTN = "` + "`" + conf.Args.DBName + "`.`" + rawTableName + "`" + `"` + "\n"
+	t += `FQTN = "` + "`" + r.DBName + "`.`" + rawTableName + "`" + `"` + "\n"
 	for _, tf := range tfs {
 		t += "Field" + db.NormalizeString(tf.Name) + " = " + `"` + tf.Name + `"` + "\n"
 	}
@@ -66,7 +83,7 @@ func GetConsts(rawTableName string, tfs []conf.TableField) string {
 	return t
 }
 
-func GetVars(tfs []conf.TableField, nqs []conf.NamedQuery) string {
+func GetVars(tfs []structs.TableField, nqs []structs.NamedQuery) string {
 	var fieldList []string
 	for _, tf := range tfs {
 		fieldList = append(fieldList, "Field"+db.NormalizeString(tf.Name))
@@ -97,7 +114,7 @@ func GetVars(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	return t
 }
 
-func GetStruct(tfs []conf.TableField) string {
+func GetStruct(tfs []structs.TableField) string {
 	t := "type Entity struct {\n"
 	for _, tf := range tfs {
 		t += db.NormalizeString(tf.Name) + " string `json:\",omitempty,omitzero\"`\n"
@@ -154,7 +171,7 @@ func GetStruct(tfs []conf.TableField) string {
 	return t
 }
 
-func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
+func GetGeneralFunctions(tfs []structs.TableField, nqs []structs.NamedQuery) string {
 	t := "func SetDB(x *sql.DB) error {\n"
 	t += "	db = x\n"
 	if len(nqs) > 0 {
@@ -357,7 +374,7 @@ func GetGeneralFunctions(tfs []conf.TableField, nqs []conf.NamedQuery) string {
 	t += "    }\n"
 	t += "    ent, err := scanRow(fields, rows)\n"
 	t += "    if err != nil { return nil, err }\n"
-	t += "    if rows.Next() { return nil, errors.New(\"queryOneCore: expected one row, got multiple\") }\n"
+	t += "    if rows.Next() { return nil, errs.ErrMultipleRows }\n"
 	t += "    if rerr := rows.Err(); rerr != nil { return nil, rerr }\n"
 	t += "    return ent, nil\n"
 	t += "}\n\n"
@@ -445,7 +462,7 @@ func GetDBFunctions() string {
 	// UPDATE with SET and WHERE (AND conditions)
 	t += "func (x *Entity) DBUpdate(params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil || len(params.Update) == 0 || len(params.Where) == 0 {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBUpdate requires both params.Update and params.Where to be specified\")}\n"
+	t += "		return &QueryResult{Error: errs.ErrUpdateParamsRequired}\n"
 	t += "	}\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(params.Update), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(params.Where), \" = ? AND \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(params.Update), x.GetFieldsValues(params.Where)...)\n"
@@ -454,7 +471,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBUpdateCtx(ctx context.Context, params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil || len(params.Update) == 0 || len(params.Where) == 0 {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBUpdate requires both params.Update and params.Where to be specified\")}\n"
+	t += "		return &QueryResult{Error: errs.ErrUpdateParamsRequired}\n"
 	t += "	}\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(params.Update), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(params.Where), \" = ? AND \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(params.Update), x.GetFieldsValues(params.Where)...)\n"
@@ -463,7 +480,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBUpdateTx(tx *sql.Tx, params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil || len(params.Update) == 0 || len(params.Where) == 0 {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBUpdate requires both params.Update and params.Where to be specified\")}\n"
+	t += "		return &QueryResult{Error: errs.ErrUpdateParamsRequired}\n"
 	t += "	}\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(params.Update), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(params.Where), \" = ? AND \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(params.Update), x.GetFieldsValues(params.Where)...)\n"
@@ -472,7 +489,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBUpdateCtxTx(ctx context.Context, tx *sql.Tx, params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil || len(params.Update) == 0 || len(params.Where) == 0 {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBUpdate requires both params.Update and params.Where to be specified\")}\n"
+	t += "		return &QueryResult{Error: errs.ErrUpdateParamsRequired}\n"
 	t += "	}\n"
 	t += "	q := \"UPDATE \" + FQTN + \" SET \" + strings.Join(GetQualifiedPlaceholders(params.Update), \", \") + \" WHERE \" + strings.Join(GetQualifiedFields(params.Where), \" = ? AND \") + \" = ?\"\n"
 	t += "	vals := append(x.GetFieldsValues(params.Update), x.GetFieldsValues(params.Where)...)\n"
@@ -555,7 +572,7 @@ func GetDBFunctions() string {
 	//Exists - flexible: Select controls returned fields, Where controls filter
 	t += "func (x *Entity) DBExists(params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBExists requires params to be specified\"), Exists: false}\n"
+	t += "		return &QueryResult{Error: errs.ErrExistsParamsRequired, Exists: false}\n"
 	t += "	}\n"
 	t += "	fieldsToSelect := params.Select\n"
 	t += "	if len(fieldsToSelect) == 0 { fieldsToSelect = Fields }\n"
@@ -570,7 +587,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBExistsCtx(ctx context.Context, params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBExists requires params to be specified\"), Exists: false}\n"
+	t += "		return &QueryResult{Error: errs.ErrExistsParamsRequired, Exists: false}\n"
 	t += "	}\n"
 	t += "	fieldsToSelect := params.Select\n"
 	t += "	if len(fieldsToSelect) == 0 { fieldsToSelect = Fields }\n"
@@ -585,7 +602,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBExistsTx(tx *sql.Tx, params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBExists requires params to be specified\"), Exists: false}\n"
+	t += "		return &QueryResult{Error: errs.ErrExistsParamsRequired, Exists: false}\n"
 	t += "	}\n"
 	t += "	fieldsToSelect := params.Select\n"
 	t += "	if len(fieldsToSelect) == 0 { fieldsToSelect = Fields }\n"
@@ -600,7 +617,7 @@ func GetDBFunctions() string {
 	t += "}\n\n"
 	t += "func (x *Entity) DBExistsCtxTx(ctx context.Context, tx *sql.Tx, params *QueryParams) *QueryResult {\n"
 	t += "	if params == nil {\n"
-	t += "		return &QueryResult{Error: errors.New(\"DBExists requires params to be specified\"), Exists: false}\n"
+	t += "		return &QueryResult{Error: errs.ErrExistsParamsRequired, Exists: false}\n"
 	t += "	}\n"
 	t += "	fieldsToSelect := params.Select\n"
 	t += "	if len(fieldsToSelect) == 0 { fieldsToSelect = Fields }\n"
@@ -617,7 +634,7 @@ func GetDBFunctions() string {
 	return t
 }
 
-func GetNamedQueryFunctions(nqs []conf.NamedQuery) string {
+func GetNamedQueryFunctions(nqs []structs.NamedQuery) string {
 	t := ""
 
 	for _, nq := range nqs {

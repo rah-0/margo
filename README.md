@@ -4,29 +4,27 @@
 
 # MarGO
 
-Generate Go database code from MariaDB schemas, with optional SQL migrations.
-
-MarGO reads your tables and generates structs, CRUD methods, and functions for
-custom SQL. The generated code uses explicit field mapping, `database/sql`,
-cached prepared statements, contexts, and transactions. It has no MarGO runtime
-dependency.
+Generate Go structs, CRUD methods, and custom-query functions from MariaDB
+schemas. Use the CLI or call MarGO from Go, with optional SQL migrations before
+generation. Generated code supports contexts and transactions and has no MarGO
+runtime dependency.
 
 **All generated column fields are strings.** SQL `NULL` becomes `""` on read,
 so generated values do not distinguish NULL from an empty string.
 
-Requires **Go 1.27 or newer**. Tested with **MariaDB 12.3.3**; MySQL compatibility,
-including migration session checks, has not been verified.
+Requires **Go 1.27.1 or newer**. Tested with **MariaDB 12.3.3**; MySQL compatibility
+has not been verified.
 
-[Quick start](#quick-start) · [Migrations](#migrations) ·
+[Quick start](#quick-start) · [Go package](#go-package) · [Migrations](#migrations) ·
 [Generated code](#using-generated-code) · [Custom SQL](#custom-sql) ·
-[CLI reference](#cli-reference) · [Development](#development)
+[CLI reference](#cli-reference)
 
 ## Quick start
 
 Install the CLI:
 
 ```bash
-go install github.com/rah-0/margo@latest
+go install github.com/rah-0/margo/cmd/margo@latest
 ```
 
 From your application's Go module, generate code for an existing database.
@@ -41,47 +39,155 @@ margo \
   -outputPath=./generated
 ```
 
-MarGO validates output paths before database work, rejecting existing files and
-broken symbolic links. Symlinks are followed, so the real output destination must
-be inside a Go module for generated imports to resolve correctly. For a new
-project, initialize one with `go mod init example.com/app`.
+The output directory must be inside a Go module. For a new project, initialize
+one with `go mod init example.com/app`. MarGO creates the output directory if
+needed.
 
 Two optional flags extend this command:
 
 - `-migrationsPath=./migrations` creates the database if missing and applies SQL
-  migrations **before any schema inspection or code generation**.
+  migrations before generating code.
 - `-queriesPath=./queries` adds functions for your custom SQL queries.
 
-Without `-migrationsPath`, MarGO uses the existing database and skips migrations.
-If a migration fails, generation stops immediately: existing generated files
-stay untouched, and missing output directories are not created.
-
-`-outputPath` is optional: omit it to run migrations without generating code.
-Custom queries require an output directory, so `-queriesPath` must be paired
-with `-outputPath`. If none of the three paths is set, MarGO prints a warning
-and exits successfully without requiring credentials or connecting to a database.
+Omit `-outputPath` to run migrations alone. Custom queries require an output
+path. Without any of these paths, MarGO exits successfully without doing work.
 
 For an `app` database containing a `users` table, the output is:
 
 ```text
 generated/
+├── errs/
+│   └── errors.go
 └── App/
-    ├── queries.go        # SetDB, transaction helpers, standalone queries
+    ├── queries.go
     └── Users/
-        └── entity.go     # Entity, field constants, CRUD, table-mapped queries
+        └── entity.go
 ```
 
-Each application table gets its own package. `queries.go` is always generated,
-even without custom queries. Database, table, and column names become Go
+Each table gets its own package. Database, table, and column names become Go
 identifiers: `app` → `App`, `user_profiles` → `UserProfiles`,
-`last_update` → `LastUpdate`. Hyphens, dots, and camel-case boundaries are also
-handled. Regeneration overwrites the generated files; keep application code
-separate.
+`last_update` → `LastUpdate`.
+
+Regeneration overwrites generated files; keep application code separate.
+It does not remove obsolete generated files. A generation failure may leave
+partial output. Concurrent runs should use separate output directories.
+
+## Go package
+
+Call `runner.Run` to generate code, apply migrations, or do both. Your application
+needs neither a MarGO executable nor a Go toolchain at runtime. Generation still
+needs an enclosing `go.mod`; migrations alone do not.
+
+### Generate code
+
+Provide connection settings and an output path. MarGO opens and closes the
+database connections; the port defaults to `3306`.
+
+```go
+import (
+    "context"
+
+    "github.com/rah-0/margo/runner"
+    "github.com/rah-0/margo/structs"
+)
+
+func generate(ctx context.Context, password string) error {
+    return runner.Run(ctx, runner.Options{
+        Connection: &structs.ConnectionOptions{
+            User:     "app",
+            Password: password,
+            Host:     "127.0.0.1",
+            Database: "app",
+        },
+        OutputPath:  "./generated",
+        QueriesPath: "./queries", // Omit when no custom queries are needed.
+    })
+}
+```
+
+### Apply migrations
+
+Using your connection settings, migrate without generating output:
+
+```go
+err := runner.Run(ctx, runner.Options{
+    Connection:     connection,
+    MigrationsPath: "./migrations",
+})
+```
+
+MarGO creates the configured database if it is missing. To generate code from
+the migrated schema, add output and optional query paths:
+
+```go
+err := runner.Run(ctx, runner.Options{
+    Connection:     connection,
+    MigrationsPath: "./migrations",
+    OutputPath:     "./generated",
+    QueriesPath:    "./queries",
+})
+```
+
+### Use an existing pool
+
+Pass your application's `*sql.DB` through `DB`:
+
+```go
+err := runner.Run(ctx, runner.Options{
+    DB:             database,
+    MigrationsPath: "./migrations",
+    OutputPath:     "./generated",
+})
+```
+
+You remain responsible for closing the pool. Every connection must select the
+same existing database. For migrations, configure `multiStatements=true`, enable
+autocommit, and start without an open transaction. Use `Connection` when you
+need MarGO to create a missing database.
+
+### Embed migrations in an application
+
+Extract embedded SQL to a temporary directory and pass it as `MigrationsPath`:
+
+```go
+import (
+    "context"
+    "embed"
+    "io/fs"
+    "os"
+
+    "github.com/rah-0/margo/runner"
+    "github.com/rah-0/margo/structs"
+)
+
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
+
+func migrateEmbedded(ctx context.Context, connection *structs.ConnectionOptions) error {
+    source, err := fs.Sub(migrationFiles, "migrations")
+    if err != nil {
+        return err
+    }
+    directory, err := os.MkdirTemp("", "margo-migrations-*")
+    if err != nil {
+        return err
+    }
+    defer os.RemoveAll(directory)
+    if err := os.CopyFS(directory, source); err != nil {
+        return err
+    }
+    return runner.Run(ctx, runner.Options{
+        Connection:     connection,
+        MigrationsPath: directory,
+    })
+}
+```
+
+The same extraction pattern works for `QueriesPath`.
 
 ## Migrations
 
-Keep migrations in a separate directory, with one forward-only SQL file per
-version. Use four-digit zero-padding:
+Keep migrations in a separate directory, with one SQL file per version:
 
 ```text
 migrations/
@@ -105,11 +211,8 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS email VARCHAR(255) NOT NULL DEFAULT '';
 ```
 
-Add `-migrationsPath=./migrations` to the [quick-start command](#quick-start).
-The database user needs permission to create the configured database and run
-the migration SQL. Entities and custom-query bindings then use the updated schema.
-
-To apply migrations alone, omit `-outputPath` and `-queriesPath`:
+Add `-migrationsPath=./migrations` to the [quick-start command](#quick-start),
+or apply migrations alone:
 
 ```bash
 margo \
@@ -120,99 +223,65 @@ margo \
   -migrationsPath=./migrations
 ```
 
-This mode does not inspect tables or generate files and needs no Go module in
-the working directory.
+The database user needs permission to run the migration SQL and, if necessary,
+create the database. Migration-only runs work outside a Go module.
 
-### Versions and repeated runs
+### Naming and repeated runs
 
-MarGO keeps the last completed version in a single row of
-`margo_schema_version`. This reserved table is always excluded from generation,
-including runs without migrations enabled.
+Use filenames such as `0001_users.sql`: a positive version number, an underscore,
+a name, and `.sql`. Names start with a letter or digit and contain ASCII letters,
+digits, underscores, or hyphens. Keep files directly inside the migrations
+directory.
 
-- A fresh database starts at version `0`; its first migration is `0001`.
-- Pending versions must be consecutive. At version `4`, files `0005` and `0007`
-  are rejected because `0006` is missing, before either pending file runs.
-- Completed versions are skipped. Editing an applied file does not rerun it;
-  add a new migration for subsequent changes.
-- Applied files need not remain on disk, but fresh databases still need the
-  complete sequence from `0001`.
+- Start at `0001` for a fresh database and keep versions consecutive.
+- Completed versions are skipped. Add a new file for later changes;
+  editing an applied migration does not rerun it.
+- Keep the full sequence when provisioning fresh databases.
 
-Filenames follow `{version}_{name}.sql`. Versions are positive `uint64` numbers;
-leading zeros do not change their value. Names start with an ASCII letter or
-digit and contain only ASCII letters, digits, underscores, or hyphens. Duplicate
-versions and malformed SQL filenames are rejected. Subdirectories and non-SQL
-files are ignored.
+Migrations move forward only; there are no rollback commands.
 
-### Execution and recovery
-
-Each file runs unchanged as one SQL execution. There are no up/down sections,
-statement splitting, rollback commands, or migration history records. The CLI
-enables multi-statement execution automatically. An advisory lock serializes
-migrators for the same database, with a 30-second wait limit and context cancellation.
-
-The stored version advances only after a file succeeds. On SQL or version-update
-failure, MarGO stops and reports the file, version, and failed operation.
+### Handling a failed migration
 
 **Write SQL that is safe to retry, including data changes.** MariaDB DDL can
-commit implicitly, so a failed file may leave earlier changes applied. A file
-can also run again if its SQL succeeded but its version update failed. Inspect
-the database, make the failed migration safe to retry if necessary, and rerun
-the command. MarGO resumes from the stored version without automatic repair.
+commit implicitly, so a failed migration may leave earlier changes applied.
+Inspect the database, make the failed migration safe to retry if necessary,
+and rerun. A migration can also run again if its SQL succeeded but recording its
+completion failed.
 
 `CREATE TABLE IF NOT EXISTS` only guards creation; it does not update an existing
 table's definition. Use a new migration for later schema changes.
 
-Before initializing version storage and after each file, MarGO requires the
-original database to be selected, autocommit to be enabled, and no transaction
-to remain open. Complete `START TRANSACTION` … `COMMIT` blocks within a file are
-allowed. A violation returns `migrate.ErrInvalidSessionState`, leaves that file's
-version unrecorded, and stops generation.
+Each migration must finish with the target database selected, autocommit enabled,
+and any transaction committed or rolled back. Complete
+`START TRANSACTION` … `COMMIT` blocks within a file are allowed.
 
-The dedicated connection is physically closed after lock cleanup on every run.
-This isolates session settings and rolls back any uncommitted transactional work;
-previously committed changes remain. MarGO never commits an unfinished transaction.
-
-### Use the migrator from Go
-
-The migrator can also run independently of code generation:
-
-```go
-import "github.com/rah-0/margo/migrate"
-
-err := migrate.Run(ctx, migrate.Options{
-    DB:   database,
-    Path: "./migrations",
-})
-```
-
-Supply a `*sql.DB` with the target database selected, `multiStatements=true`,
-and autocommit enabled. The package does not create databases and leaves the
-caller's pool open. Errors support `errors.Is` and `errors.As`; for example,
-`migrate.ErrVersionGap` identifies a missing pending version.
+When a migration fails, code generation does not start: existing generated files
+stay unchanged, and missing output directories are not created.
 
 ## Using generated code
 
-Open a `database/sql` pool with a registered MySQL driver, then call `SetDB` on
-the generated database package once during initialization. It shares the pool
-with every generated table package.
+Open a `database/sql` pool with a registered MySQL driver. Initialize the generated
+database package once with your application's pool:
 
-For module `example.com/app` and the output above:
+```go
+import appdb "example.com/app/generated/App"
+
+if err := appdb.SetDB(database); err != nil {
+    return err
+}
+```
+
+Then use the generated table packages:
 
 ```go
 import (
     "context"
-    "database/sql"
     "fmt"
 
-    appdb "example.com/app/generated/App"
     users "example.com/app/generated/App/Users"
 )
 
-func listUsers(ctx context.Context, database *sql.DB) error {
-    if err := appdb.SetDB(database); err != nil {
-        return err
-    }
-
+func listUsers(ctx context.Context) error {
     result := users.DBSelectAllCtx(ctx)
     if result.Error != nil {
         return result.Error
@@ -226,9 +295,7 @@ func listUsers(ctx context.Context, database *sql.DB) error {
 
 ### CRUD and field selection
 
-Each table package exposes `Entity`, `FQTN` (the qualified SQL table name),
-`Field<Name>` constants, and `Fields` in schema order. Use those constants with
-`NewQueryParams()` to select columns and filters:
+Use field constants with `NewQueryParams()` to choose columns and filters:
 
 ```go
 user := &users.Entity{Name: "Ada"}
@@ -237,8 +304,9 @@ result := user.DBSelectCtx(ctx, users.NewQueryParams().
     WithWhere(users.FieldName))
 ```
 
-Filters compare the selected fields to values on the receiver, joined with `AND`.
-Use `WithInsert` to omit columns that should receive database defaults.
+CRUD operations take values from the entity. Filters compare the selected fields
+to those values, joined with `AND`. Use `WithInsert` to omit columns that should
+receive database defaults.
 
 | Operation | Behavior |
 | --- | --- |
@@ -246,14 +314,13 @@ Use `WithInsert` to omit columns that should receive database defaults.
 | `entity.DBUpdate(params)` | Requires both `WithUpdate` and `WithWhere`. |
 | `entity.DBDelete(params)` | Deletes rows matching `WithWhere`; defaults to matching all columns. |
 | `entity.DBSelect(params)` | Uses `WithSelect` and `WithWhere`; defaults to all columns and no filter. |
-| `entity.DBExists(params)` | Requires non-nil params. Selects and filters on all columns unless specified; on a match, fills the receiver and sets `Exists`. |
+| `entity.DBExists(params)` | Requires non-nil params. Selects and filters on all columns unless specified; on a match, replaces the receiver with the selected values and sets `Exists`. |
 | `users.DBSelectAll()` | Reads every row and column. |
 | `users.DBTruncate()` | Truncates the table. |
 
 Every operation returns a result with an `Error` field; check it before using
 the other fields. Reads populate `Entities`, writes populate `Result`
 (`sql.Result`), and `DBExists` populates `Exists` while updating the receiver.
-Single-row custom queries use `Entity` and `Exists`.
 
 ### Contexts and transactions
 
@@ -266,9 +333,7 @@ user.DBInsertTx(tx, params)
 user.DBInsertCtxTx(ctx, tx, params)
 ```
 
-The database package provides `NewTx()`, `NewCtxTx(ctx)`, `NewTxOpts(opts)`, and
-`NewCtxTxOpts(ctx, opts)`, each returning `(*sql.Tx, error)`. Commit or roll back
-the transaction yourself:
+Use the database package to begin a transaction, then commit or roll it back:
 
 ```go
 tx, err := appdb.NewCtxTx(ctx)
@@ -286,7 +351,8 @@ if result.Error != nil {
 return tx.Commit()
 ```
 
-Prepared statements are cached by query string and reused across transactions.
+`NewCtxTxOpts(ctx, opts)` accepts `*sql.TxOptions` for isolation and read-only
+settings. `NewTx()` and `NewTxOpts(opts)` are available without a context.
 
 ## Custom SQL
 
@@ -331,10 +397,8 @@ Put each tag on its own line. Separate field names with whitespace, **not commas
 | `-- Params: id` | Optional documentation only; it does not control generated parameters. |
 
 With `MapAs`, each `Returns` name must be an exact column name from the mapped
-table. Without it, MarGO generates a standalone function in `App/queries.go`
-with its own `Query<Name>Result` and `Query<Name>ResultInner` row type for row
-results. Result field names are normalized to Go identifiers, and their values
-are strings.
+table. Without it, the function lives in `App/queries.go` and has its own result
+and row types. Row field names become Go identifiers, and their values are strings.
 
 | Mode | Function | Result fields |
 | --- | --- | --- |
@@ -348,12 +412,11 @@ rows, while standalone queries read the first row.
 SQL containing `?` generates a `*QueryParams` argument. Pass a non-nil
 `NewQueryParams().WithParams(...)`, with values in placeholder order. Queries
 without `?` have no params argument. Custom functions use the same `Ctx`, `Tx`,
-and `CtxTx` suffixes as CRUD methods. Ordinary SQL comments are removed when
-generating custom queries.
+and `CtxTx` suffixes as CRUD methods.
 
-See the [SQL fixtures](integration/testdata/queries) and
-[generated-code usage tests](integration/testdata/generated_runtime_test.go)
-for more examples.
+See the [SQL examples](tests/integration/testdata/queries) and
+[generated-code usage examples](tests/integration/testdata/generated_runtime_test.go)
+for more.
 
 ## CLI reference
 
@@ -364,36 +427,27 @@ for more examples.
 | `-dbName` | Yes | — | Database to inspect and migrate. |
 | `-dbIp` | Yes | — | Database hostname or IP address. |
 | `-dbPort` | No | `3306` | Database port. |
-| `-outputPath` | No | — | Enables code generation into this directory inside a Go module; created if missing. |
-| `-queriesPath` | No | — | Existing directory of custom SQL queries; requires `-outputPath`. |
-| `-migrationsPath` | No | — | Existing directory of numbered SQL migrations. |
+| `-outputPath` | No | — | Generate code into this directory inside a Go module. |
+| `-queriesPath` | No | — | Directory of custom SQL queries; requires `-outputPath`. |
+| `-migrationsPath` | No | — | Directory of numbered SQL migrations. |
 
 Database credentials are required when generation or migrations are requested.
-The CLI writes completion, warning, and error logs to stderr and exits non-zero
-on failure. With no paths selected, it warns and exits successfully without work.
+Run `margo -help` to show usage.
 
-## Development
-
-Unit tests need no database or Docker:
+From the source checkout, run or build the CLI with:
 
 ```bash
-go test -count=1 -race -cover -covermode=atomic ./...
+go run ./cmd/margo
+go build ./cmd/margo
 ```
 
-With Docker available, run the MariaDB integration suite:
-
-```bash
-go test -tags=integration -count=1 -race -cover -covermode=atomic ./integration
-```
-
-The suite starts disposable MariaDB containers with random ports and cleans them
-up afterward. It covers migrations and runs generated CRUD and custom-query code
-in temporary Go modules. No local database credentials or checked-in generated
-output are needed.
-
-For performance comparisons with raw SQL, Bun, Ent, and GORM, see
-[BENCHMARKS.md](BENCHMARKS.md) for results, methodology, and commands.
+For contributing and performance comparisons, see [Testing](tests/README.md)
+and [Benchmarks](BENCHMARKS.md).
 
 ---
 
-[Support MarGO](https://www.buymeacoffee.com/rah.0)
+# ☕ Support
+
+Less boilerplate, more time to build. If MarGO made your work easier, buy me a coffee and help fuel what comes next ☕
+
+[![Buy Me A Coffee](https://cdn.buymeacoffee.com/buttons/default-orange.png)](https://www.buymeacoffee.com/rah.0)
