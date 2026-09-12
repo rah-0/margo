@@ -119,6 +119,11 @@ func GetGeneralFunctionsQueries(tns []string, hasCustomQueries bool) string {
 	t += "\nreturn nil\n"
 	t += "}\n\n"
 
+	t += "// GetDB returns the pool supplied to SetDB, or nil if none is set.\n"
+	t += "func GetDB() *sql.DB {\n"
+	t += "return db\n"
+	t += "}\n\n"
+
 	t += "func NewTx() (*sql.Tx, error) {\n"
 	t += "if db == nil {\n"
 	t += `return nil, errs.ErrDatabaseNotInitialized` + "\n"

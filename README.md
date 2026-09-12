@@ -324,6 +324,9 @@ if err := appdb.SetDB(database); err != nil {
 }
 ```
 
+The database and table packages expose `GetDB() *sql.DB` to retrieve the pool
+supplied to `SetDB`. It returns `nil` if no pool is set.
+
 Then use the generated table packages:
 
 ```go

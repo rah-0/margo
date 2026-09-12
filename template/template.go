@@ -185,6 +185,11 @@ func GetGeneralFunctions(tfs []structs.TableField, nqs []structs.NamedQuery) str
 	t += "    return nil\n"
 	t += "}\n\n"
 
+	t += "// GetDB returns the pool supplied to SetDB, or nil if none is set.\n"
+	t += "func GetDB() *sql.DB {\n"
+	t += "\treturn db\n"
+	t += "}\n\n"
+
 	t += "func (x *Entity) GetFieldValue(field string) any {\n"
 	t += "	switch field {\n"
 	for _, tf := range tfs {
