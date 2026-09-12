@@ -1,8 +1,10 @@
 package runner
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"github.com/rah-0/margo/conf"
@@ -26,7 +28,13 @@ type Options struct {
 	// QueriesPath contains named SQL query files and requires OutputPath.
 	QueriesPath string
 	// MigrationsPath contains numbered SQL migrations to apply before generation.
+	// It is mutually exclusive with MigrationsFS.
 	MigrationsPath string
+	// MigrationsFS contains numbered SQL migrations directly in its root (".").
+	// Use fs.Sub for a subdirectory. A non-nil FS enables migrations even when
+	// empty. The caller keeps it valid and stable throughout Run and retains
+	// ownership; MarGO only reads it.
+	MigrationsFS fs.FS
 }
 
 type connectionField struct {
@@ -34,9 +42,20 @@ type connectionField struct {
 	value string
 }
 
-func (opts Options) validate() error {
+func (opts Options) validate(ctx context.Context) error {
+	if opts.MigrationsPath != "" && opts.MigrationsFS != nil {
+		return errs.ErrMigrationsSourceConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := conf.ValidatePaths(opts.OutputPath, opts.QueriesPath, opts.MigrationsPath); err != nil {
 		return err
+	}
+	if opts.MigrationsFS != nil {
+		if _, err := fs.ReadDir(opts.MigrationsFS, "."); err != nil {
+			return fmt.Errorf("read migrations filesystem root: %w", err)
+		}
 	}
 	if opts.DB != nil && opts.Connection != nil {
 		return errs.ErrConnectionConflict

@@ -3,13 +3,15 @@ package migrate
 import (
 	"cmp"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/rah-0/margo/errs"
-	"github.com/rah-0/margo/util"
 )
 
 var filenamePattern = regexp.MustCompile(`^([0-9]+)_([A-Za-z0-9][A-Za-z0-9_-]*)\.sql$`)
@@ -20,15 +22,58 @@ var filenamePattern = regexp.MustCompile(`^([0-9]+)_([A-Za-z0-9][A-Za-z0-9_-]*)\
 // numbering gaps. PendingMigrations validates the pending sequence against a
 // database's current version.
 func Discover(path string) ([]Migration, error) {
-	paths, err := util.GetSQLFilesInDir(path)
+	// Preserve the empty disk path's read error: DirFS("") reports an invalid
+	// filesystem instead of the missing directory reported by os.ReadDir("").
+	if path == "" {
+		_, err := os.ReadDir(path)
+		return nil, fmt.Errorf("read SQL directory %q: %w", path, err)
+	}
+	migrations, err := discover(os.DirFS(path), path)
 	if err != nil {
 		return nil, err
 	}
+	for i := range migrations {
+		migrations[i].Path = filepath.Join(path, migrations[i].Path)
+	}
+	return migrations, nil
+}
+
+// DiscoverFS validates SQL migration filenames directly inside source's root
+// directory (".") and returns relative names sorted by increasing version.
+// It follows Discover's filename rules and leaves sequence validation to
+// PendingMigrations. A nil source returns an error matching fs.ErrInvalid.
+// The caller retains ownership of source; discovery only reads its directory.
+func DiscoverFS(source fs.FS) ([]Migration, error) {
+	return discover(source, "")
+}
+
+// discover keeps lookup names relative. directory supplies disk context for
+// diagnostics only and must never be used to clean or rebuild the source root.
+func discover(source fs.FS, directory string) ([]Migration, error) {
+	root := "."
+	if directory != "" {
+		root = directory
+	}
+	if source == nil {
+		return nil, &fs.PathError{Op: "readdir", Path: root, Err: fs.ErrInvalid}
+	}
+	entries, err := fs.ReadDir(source, ".")
+	if err != nil {
+		return nil, fmt.Errorf("read SQL directory %q: %w", root, err)
+	}
 
 	var migrations []Migration
-	versions := make(map[uint64]string, len(paths))
-	for _, path := range paths {
-		matches := filenamePattern.FindStringSubmatch(filepath.Base(path))
+	versions := make(map[uint64]string, len(entries))
+	for _, entry := range entries {
+		filename := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(filename), ".sql") {
+			continue
+		}
+		path := filename
+		if directory != "" {
+			path = filepath.Join(directory, filename)
+		}
+		matches := filenamePattern.FindStringSubmatch(filename)
 		if matches == nil {
 			return nil, fmt.Errorf("%w: %q", errs.ErrInvalidFilename, path)
 		}
@@ -43,7 +88,7 @@ func Discover(path string) ([]Migration, error) {
 			return nil, fmt.Errorf("%w: %d in %q and %q", errs.ErrDuplicateVersion, version, previous, path)
 		}
 		versions[version] = path
-		migrations = append(migrations, Migration{Version: version, Path: path})
+		migrations = append(migrations, Migration{Version: version, Path: filename})
 	}
 	slices.SortFunc(migrations, func(a, b Migration) int {
 		return cmp.Compare(a.Version, b.Version)
@@ -53,7 +98,7 @@ func Discover(path string) ([]Migration, error) {
 
 // PendingMigrations returns the consecutive migrations newer than current, or
 // errs.ErrVersionGap when that pending sequence skips a version. It expects migrations
-// sorted by increasing version, as returned by Discover. The returned suffix
+// sorted by increasing version, as returned by Discover or DiscoverFS. The returned suffix
 // shares the input slice's backing array; this function does not modify it.
 func PendingMigrations(migrations []Migration, current uint64) ([]Migration, error) {
 	first := 0

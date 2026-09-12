@@ -15,14 +15,16 @@ import (
 	"github.com/rah-0/margo/template"
 )
 
-// Run validates the requested paths, acquires a connection, applies migrations,
-// and then generates bindings. With no paths it succeeds without any work.
+// Run validates the requested paths and filesystem, acquires a connection,
+// applies migrations, and then generates bindings. With no paths or filesystem
+// it succeeds without any work.
 // It never closes a caller-supplied DB or changes process configuration.
 func Run(ctx context.Context, opts Options) (err error) {
-	if opts.OutputPath == "" && opts.QueriesPath == "" && opts.MigrationsPath == "" {
+	migrationsEnabled := opts.MigrationsPath != "" || opts.MigrationsFS != nil
+	if opts.OutputPath == "" && opts.QueriesPath == "" && !migrationsEnabled {
 		return nil
 	}
-	if err := opts.validate(); err != nil {
+	if err := opts.validate(ctx); err != nil {
 		return fmt.Errorf("validate options: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -38,7 +40,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 			settings.Port = "3306"
 		}
 		database = settings.Database
-		conn, err = db.ConnectContext(ctx, settings, opts.MigrationsPath != "")
+		conn, err = db.ConnectContext(ctx, settings, migrationsEnabled)
 		if err != nil {
 			return fmt.Errorf("connect to database: %w", err)
 		}
@@ -58,8 +60,8 @@ func Run(ctx context.Context, opts Options) (err error) {
 		database = selected.String
 	}
 
-	if opts.MigrationsPath != "" {
-		if err := migrate.Run(ctx, migrate.Options{DB: conn, Path: opts.MigrationsPath}); err != nil {
+	if migrationsEnabled {
+		if err := migrate.Run(ctx, migrate.Options{DB: conn, Path: opts.MigrationsPath, FS: opts.MigrationsFS}); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}

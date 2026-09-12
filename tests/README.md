@@ -27,9 +27,11 @@ GOWORK=off go -C tests test -tags=integration -count=1 -race -cover -covermode=a
 ```
 
 The suite starts disposable MariaDB containers on random ports and cleans them
-up afterward. It checks migrations, generation, and generated CRUD and named
-queries in temporary Go modules. No existing database or local database
-credentials are required.
+up afterward. It checks disk and directly embedded migrations through both Go
+APIs, database bootstrap, migration failures and reruns, and equivalent generated
+output. Generation and generated CRUD and named queries use temporary Go
+modules; migration-only runs need no Go module. No existing database or local
+database credentials are required.
 
 ## Static checks
 

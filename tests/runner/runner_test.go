@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/rah-0/margo/errs"
@@ -124,16 +125,18 @@ func TestRunBorrowedEmptySchema(t *testing.T) {
 func TestRunBorrowedErrors(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name      string
-		database  driver.Value
-		queryErr  error
-		migration bool
-		want      error
+		name       string
+		database   driver.Value
+		queryErr   error
+		migration  bool
+		filesystem bool
+		want       error
 	}{
 		{name: "null selection", want: errs.ErrDatabaseNotSelected},
 		{name: "empty selection", database: "", want: errs.ErrDatabaseNotSelected},
 		{name: "schema query", database: "app", queryErr: testerrs.ErrSchemaUnavailable, want: testerrs.ErrSchemaUnavailable},
 		{name: "migration discovery", database: "app", migration: true, want: errs.ErrInvalidFilename},
+		{name: "filesystem migration discovery", database: "app", migration: true, filesystem: true, want: errs.ErrInvalidFilename},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -141,7 +144,9 @@ func TestRunBorrowedErrors(t *testing.T) {
 			pool := borrowedTestPool(t, connector)
 			output := filepath.Join(t.TempDir(), "output")
 			opts := runner.Options{DB: pool, OutputPath: output}
-			if tc.migration {
+			if tc.filesystem {
+				opts.MigrationsFS = fstest.MapFS{"invalid.sql": {Data: []byte("DO 0;")}}
+			} else if tc.migration {
 				opts.MigrationsPath = t.TempDir()
 				if err := os.WriteFile(filepath.Join(opts.MigrationsPath, "invalid.sql"), []byte("DO 0;"), 0o600); err != nil {
 					t.Fatal(err)

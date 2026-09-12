@@ -78,6 +78,9 @@ Call `runner.Run` to generate code, apply migrations, or do both. Your applicati
 needs neither a MarGO executable nor a Go toolchain at runtime. Generation still
 needs an enclosing `go.mod`; migrations alone do not.
 
+Use named fields in `runner.Options` and `migrate.Options` literals. Callers using
+positional literals must update them for the added `MigrationsFS` and `FS` fields.
+
 ### Generate code
 
 Provide connection settings and an output path. MarGO opens and closes the
@@ -147,43 +150,81 @@ need MarGO to create a missing database.
 
 ### Embed migrations in an application
 
-Extract embedded SQL to a temporary directory and pass it as `MigrationsPath`:
+Pass embedded SQL directly as a filesystem. Put `embed.go` beside the SQL files
+in a migration package:
 
-```go
-import (
-    "context"
-    "embed"
-    "io/fs"
-    "os"
-
-    "github.com/rah-0/margo/runner"
-    "github.com/rah-0/margo/structs"
-)
-
-//go:embed migrations/*.sql
-var migrationFiles embed.FS
-
-func migrateEmbedded(ctx context.Context, connection *structs.ConnectionOptions) error {
-    source, err := fs.Sub(migrationFiles, "migrations")
-    if err != nil {
-        return err
-    }
-    directory, err := os.MkdirTemp("", "margo-migrations-*")
-    if err != nil {
-        return err
-    }
-    defer os.RemoveAll(directory)
-    if err := os.CopyFS(directory, source); err != nil {
-        return err
-    }
-    return runner.Run(ctx, runner.Options{
-        Connection:     connection,
-        MigrationsPath: directory,
-    })
-}
+```text
+migrations/
+├── embed.go
+├── 0001_users.sql
+└── 0002_email.sql
 ```
 
-The same extraction pattern works for `QueriesPath`.
+```go
+package migrations
+
+import "embed"
+
+//go:embed *.sql
+var Files embed.FS
+```
+
+Import that package in your application and pass its filesystem to `runner.Run`:
+
+```go
+err := runner.Run(ctx, runner.Options{
+    Connection:   connection,
+    MigrationsFS: migrations.Files,
+})
+```
+
+MarGO reads the embedded files directly, without extraction or a migration path.
+This also creates the database if missing; add `OutputPath` to generate bindings
+after the migrations succeed.
+
+For migrations on an existing pool, import `github.com/rah-0/margo/migrate` and
+call its entry point directly:
+
+```go
+err := migrate.Run(ctx, migrate.Options{
+    DB: database,
+    FS: migrations.Files,
+})
+```
+
+The same [pool requirements](#use-an-existing-pool) apply. The pool remains open
+after either call.
+
+A filesystem represents the migration directory itself: MarGO reads its `"."`
+directory and only considers direct children. If `files` embeds
+`_Migrations/*.sql`, import `io/fs` and select that subdirectory with `fs.Sub`:
+
+```go
+source, err := fs.Sub(files, "_Migrations")
+if err != nil {
+    return err
+}
+
+return runner.Run(ctx, runner.Options{
+    Connection:   connection,
+    MigrationsFS: source,
+})
+```
+
+Choose exactly one migration source: `MigrationsPath` or `MigrationsFS` for
+`runner.Run`, and `Path` or `FS` for `migrate.Run`. Supplying both returns
+`errs.ErrMigrationsSourceConflict` before database or output work. With neither,
+`runner.Run` disables migrations; direct `migrate.Run` requires a source and
+returns `errs.ErrPathRequired` when its database pool is valid. An accessible,
+empty filesystem root is valid and enables migrations.
+
+MarGO accepts any `fs.FS`, reads it synchronously, and closes the file handles it
+opens. The caller retains ownership and must keep the source valid and stable
+throughout the call. Context cancellation is checked between operations and
+during SQL execution; it cannot interrupt a blocking filesystem operation.
+
+Existing disk paths and CLI flags remain supported. Query loading and generated
+output remain path-based through `QueriesPath` and `OutputPath`.
 
 ## Migrations
 

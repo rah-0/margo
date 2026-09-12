@@ -7,7 +7,6 @@ import (
 	"embed"
 	"errors"
 	"flag"
-	"io/fs"
 	"log/slog"
 	"maps"
 	"os"
@@ -16,16 +15,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/rah-0/margo/errs"
 	"github.com/rah-0/margo/migrate"
 	"github.com/rah-0/margo/runner"
+	"github.com/rah-0/margo/tests/integration/testdata/migrations"
 )
 
 // These tests import the public runner API from a separate package, as a consumer
-// does. SQL remains path-based after extraction from the embedded fixture.
+// does. This parent filesystem also verifies selection through fs.Sub.
 //
 //go:embed testdata/migrations/*.sql
 var embeddedMigrations embed.FS
@@ -48,6 +49,7 @@ func TestRunOperations(t *testing.T) {
 			for _, tc := range []struct {
 				name                        string
 				output, queries, migrations bool
+				filesystem                  bool
 				want                        error
 			}{
 				{name: "no paths"},
@@ -56,8 +58,12 @@ func TestRunOperations(t *testing.T) {
 				{name: "migrations", migrations: true},
 				{name: "migrations and output", migrations: true, output: true},
 				{name: "all paths", migrations: true, output: true, queries: true},
+				{name: "filesystem", migrations: true, filesystem: true},
+				{name: "filesystem and output", migrations: true, filesystem: true, output: true},
+				{name: "filesystem and all paths", migrations: true, filesystem: true, output: true, queries: true},
 				{name: "queries without output", queries: true, want: errs.ErrQueriesWithoutOutput},
 				{name: "migrations and queries without output", migrations: true, queries: true, want: errs.ErrQueriesWithoutOutput},
+				{name: "filesystem and queries without output", migrations: true, filesystem: true, queries: true, want: errs.ErrQueriesWithoutOutput},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					migrationExec(t, server.DB, "DROP TABLE IF EXISTS api_items, "+migrate.TableName)
@@ -75,7 +81,13 @@ func TestRunOperations(t *testing.T) {
 						opts.QueriesPath = queries
 					}
 					if tc.migrations {
-						opts.MigrationsPath = migrations
+						if tc.filesystem {
+							opts.MigrationsFS = fstest.MapFS{
+								"0001_items.sql": {Data: []byte("CREATE TABLE api_items (id INT PRIMARY KEY); INSERT INTO api_items VALUES (1);")},
+							}
+						} else {
+							opts.MigrationsPath = migrations
+						}
 					}
 					if err := runner.Run(t.Context(), opts); !errors.Is(err, tc.want) {
 						t.Fatalf("Run() = %v, want %v", err, tc.want)
@@ -258,24 +270,12 @@ func TestRunEmbeddedBootstrap(t *testing.T) {
 	if !errors.As(err, &databaseError) || databaseError.Number != 1049 {
 		t.Fatalf("generation without migrations should retain unknown-database error: %v", err)
 	}
-	path := t.TempDir()
-	files, err := fs.ReadDir(embeddedMigrations, "testdata/migrations")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range files {
-		content, err := embeddedMigrations.ReadFile("testdata/migrations/" + entry.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeTestFile(t, filepath.Join(path, entry.Name()), content)
-	}
 	workingDir := t.TempDir()
 	t.Chdir(workingDir)
 	before := snapshotMigrationOutput(t, workingDir)
 	connection := server.Settings
 	original := connection
-	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, MigrationsPath: path}); err != nil {
+	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, MigrationsFS: migrations.Files}); err != nil {
 		t.Fatal(err)
 	}
 	if connection != original {
@@ -285,8 +285,14 @@ func TestRunEmbeddedBootstrap(t *testing.T) {
 		t.Error("migration-only Run wrote files outside a Go module")
 	}
 	pool := migrationPool(t, server.DSN, true, true)
-	assertCLIMigrationVersion(t, pool, 1)
+	assertCLIMigrationVersion(t, pool, 2)
 	assertCLIMigrationTable(t, pool, "embedded_items", true)
+	assertMigrationCount(t, pool, "embedded_items", 2)
+	if err := runner.Run(t.Context(), runner.Options{Connection: &connection, MigrationsFS: migrations.Files}); err != nil {
+		t.Fatalf("rerun embedded migrations: %v", err)
+	}
+	assertCLIMigrationVersion(t, pool, 2)
+	assertMigrationCount(t, pool, "embedded_items", 2)
 }
 
 func TestRunIndependentCalls(t *testing.T) {
